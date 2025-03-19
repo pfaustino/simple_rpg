@@ -1,0 +1,102 @@
+{
+  "characters": {
+    "player": {
+      "idle": [
+        0
+      ],
+      "walk": [
+        0,
+        1
+      ],
+      "attack": [
+        2
+      ],
+      "hurt": [
+        3
+      ]
+    },
+    "goblin": {
+      "idle": [
+        121
+      ],
+      "walk": [
+        121,
+        122
+      ],
+      "attack": [
+        123
+      ],
+      "hurt": [
+        124
+      ]
+    },
+    "orc": {
+      "idle": [
+        120
+      ],
+      "walk": [
+        120,
+        121
+      ],
+      "attack": [
+        122
+      ],
+      "hurt": [
+        123
+      ]
+    },
+    "troll": {
+      "idle": [
+        122
+      ],
+      "walk": [
+        122,
+        123
+      ],
+      "attack": [
+        124
+      ],
+      "hurt": [
+        125
+      ]
+    },
+    "dragon": {
+      "idle": [
+        114
+      ],
+      "walk": [
+        114,
+        115
+      ],
+      "attack": [
+        116
+      ],
+      "hurt": [
+        117
+      ]
+    }
+  },
+  "terrain": {
+    "grass": "Grass/7",
+    "forest": "Map_tile_04",
+    "mountain": "Map_tile_33",
+    "water": "Tiles/Map_tile_01"
+  },
+  "items": {
+    "weapons": {
+      "sword": 0,
+      "axe": 1,
+      "bow": 2
+    },
+    "armor": {
+      "leather": 16,
+      "chain": 17,
+      "plate": 18
+    },
+    "potions": {
+      "health": 32,
+      "strength": 33,
+      "defense": 34
+    }
+  }
+}
