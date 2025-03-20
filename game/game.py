@@ -157,154 +157,76 @@ class Game:
                     self.message_time = time.time()
 
     def handle_movement(self, event):
-        self.message = "Click to move, Q to quit"
-        self.message_time = time.time()
-        show_kills = False
-        clock = pygame.time.Clock()
+        """Handle player movement and game state updates"""
+        # Calculate player screen position (needed for all drawing operations)
+        player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+        player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
         
-        while True:
-            # Process all events at the start of each frame
-            events = pygame.event.get()
-            
-            # Handle sprite debug view first
+        # Handle sprite debug view first
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+            self.show_sprite_debug = not self.show_sprite_debug
             if self.show_sprite_debug:
-                self.world.draw_sprite_debug()
-            # Then handle regular viewport if not in sprite debug or inventory
-            elif not self.show_inventory:
-                self.world.display_viewport()
-                
-                # Draw message console only in game view
-                if not self.show_debug and not self.show_sprite_debug:
-                    console_width = self.world.window_width // 3
-                    console_height = self.world.window_height // 4
-                    console_x = self.world.window_width - console_width - 10
-                    console_y = self.world.window_height - console_height - 40
-                    self.message_console.draw(self.world.screen, console_x, console_y, 
-                                           console_width, console_height)
-            
-            # Draw inventory over the last frame if it's open
-            if self.show_inventory:
-                # Don't clear the screen, just draw overlay and inventory
-                self.draw_inventory_screen()
-                
-                # Draw message in white if within duration
-                if time.time() - self.message_time < self.message_duration:
-                    self.world.draw_text(self.message, (10, self.world.window_height - 30), WHITE)
+                self.world.sprite_debug_window.open()
             else:
-                # Draw kill statistics if enabled (only when inventory is closed)
-                if show_kills:
-                    kills_y = self.world.window_height - 60
-                    kills_text = "Kills: "
-                    for enemy in ["Goblin", "Orc", "Troll", "Dragon"]:
-                        kills = self.player.kills.get(enemy, 0)
-                        kills_text += f"{enemy}: {kills} | "
-                    kills_text = kills_text[:-3]  # Remove last separator
-                    self.world.draw_text(kills_text, (20, kills_y), BLACK)
-                
-                # Draw message in black if within duration
-                if time.time() - self.message_time < self.message_duration:
-                    self.world.draw_text(self.message, (10, self.world.window_height - 30), BLACK)
+                self.world.sprite_debug_window.close()
+            return "continue"
+        
+        # Forward only relevant events to sprite debug window if it's open
+        if self.show_sprite_debug:
+            if event.type in [pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN]:
+                if self.world.handle_sprite_debug_click(event.pos if hasattr(event, 'pos') else None, event):
+                    return "continue"
+            return "continue"
+        
+        # Handle regular game controls when not in sprite debug
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_LEFT:
+                if self.world.move_player(self.world.player_x - 1, self.world.player_y):
+                    enemy = self.create_enemy()
+                    self.battle(enemy)
+            elif event.key == pygame.K_RIGHT:
+                if self.world.move_player(self.world.player_x + 1, self.world.player_y):
+                    enemy = self.create_enemy()
+                    self.battle(enemy)
+            elif event.key == pygame.K_UP:
+                if self.world.move_player(self.world.player_x, self.world.player_y - 1):
+                    enemy = self.create_enemy()
+                    self.battle(enemy)
+            elif event.key == pygame.K_DOWN:
+                if self.world.move_player(self.world.player_x, self.world.player_y + 1):
+                    enemy = self.create_enemy()
+                    self.battle(enemy)
+            elif event.key == pygame.K_ESCAPE:
+                return "quit"
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.show_sprite_debug:  # Left click
+            # Get click position relative to viewport
+            click_x, click_y = event.pos
+            viewport_x = click_x // self.world.CELL_SIZE
+            viewport_y = click_y // self.world.CELL_SIZE
             
-            # Process events
-            for event in events:
-                if event.type == pygame.QUIT:
-                    return None
-                
-                # Handle window resize events
-                if event.type == pygame.VIDEORESIZE:
-                    self.world.handle_resize(event.size)
-                    continue
-                
-                # Pass all events to the sprite debug handler if sprite debug is active
-                if self.show_sprite_debug:
-                    if self.world.handle_sprite_debug_click(pygame.mouse.get_pos(), event):
-                        continue
-                        
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1:  # Left click
-                        mouse_pos = event.pos
-                        # Handle sprite debug clicks (for compatibility with older code)
-                        if self.show_sprite_debug:
-                            if self.world.handle_sprite_debug_click(mouse_pos, event):
-                                continue
-                            
-                        # Check if console button was clicked
-                        console_width = self.world.window_width // 3
-                        console_height = self.world.window_height // 4
-                        console_x = self.world.window_width - console_width - 10
-                        console_y = self.world.window_height - console_height - 40
-                        console_rect = pygame.Rect(console_x, console_y, console_width, console_height)
-                        
-                        if self.message_console.toggle_collapse(mouse_pos, console_rect):
-                            continue  # Skip movement handling if console was clicked
-                            
-                        # Handle movement click only if not in debug views
-                        if not self.show_inventory and not self.show_debug and not self.show_sprite_debug:
-                            offset_x = (mouse_pos[0] - self.world.window_width//2) // self.world.CELL_SIZE
-                            offset_y = (mouse_pos[1] - self.world.window_height//2) // self.world.CELL_SIZE
-                            target_x = self.world.player_x + offset_x
-                            target_y = self.world.player_y + offset_y
-                            path = self.world.get_path_to(target_x, target_y)
-                            if path:
-                                for next_x, next_y in path:
-                                    has_encounter = self.world.move_player(next_x, next_y)
-                                    if has_encounter:
-                                        enemy = self.create_enemy()
-                                        self.battle(enemy)
-                                        break
-                                    time.sleep(0.2)
-                                return False
-                            else:
-                                self.message = "Cannot move there!"
-                                self.message_console.add_message("Cannot move there!")
-                                self.message_time = time.time()
-                elif event.type == pygame.KEYDOWN:
-                    # First handle any sprite debug keyboard events
-                    if self.show_sprite_debug and self.world.handle_sprite_debug_click(pygame.mouse.get_pos(), event):
-                        continue
-                        
-                    # Then handle global keyboard shortcuts
-                    if event.key == pygame.K_q:
-                        return None  # Quit
-                    elif event.key == pygame.K_s:
-                        # Toggle sprite debug view
-                        self.show_sprite_debug = not self.show_sprite_debug
-                        if self.show_sprite_debug:
-                            self.show_debug = False
-                    elif event.key == pygame.K_d:
-                        # Toggle debug view
-                        self.show_debug = not self.show_debug
-                        if self.show_debug:
-                            self.show_sprite_debug = False
-                    elif event.key == pygame.K_g:
-                        # Return to game view
-                        self.show_debug = False
-                        self.show_sprite_debug = False
-                    elif event.key == pygame.K_k:  # Toggle kill statistics
-                        show_kills = not show_kills
-                        continue
-                    elif event.key == pygame.K_i:  # Toggle inventory
-                        self.show_inventory = not self.show_inventory
-                        continue
-                    elif event.key == pygame.K_h and not self.show_inventory:
-                        heal_amount = self.player.heal()
-                        self.message = f"{self.player.name} heals for {heal_amount} HP"
-                        self.message_console.add_message(f"You heal for {heal_amount} HP")
-                        self.message_time = time.time()
-                    elif event.key == pygame.K_s and pygame.key.get_mods() & pygame.KMOD_CTRL:
-                        if save_game(self.player, self.world):
-                            self.message = "Game saved successfully!"
-                            self.message_console.add_message("Game saved successfully!")
-                        else:
-                            self.message = "Failed to save game!"
-                            self.message_console.add_message("Failed to save game!")
-                        self.message_time = time.time()
-                    # Handle inventory-specific input
-                    elif self.show_inventory:
-                        self.handle_inventory_input(event)
+            # Convert viewport coordinates to world coordinates
+            world_x = self.world.player_x - (self.world.VIEWPORT_SIZE // 2) + viewport_x
+            world_y = self.world.player_y - (self.world.VIEWPORT_SIZE // 2) + viewport_y
             
-            pygame.display.flip()
-            clock.tick(60)  # Cap at 60 FPS
+            # Get path to clicked location
+            path = self.world.get_path_to(world_x, world_y)
+            if path:
+                # Move along the path
+                for next_x, next_y in path:
+                    if self.world.move_player(next_x, next_y):
+                        enemy = self.create_enemy()
+                        self.battle(enemy)
+                        if not self.player.is_alive():
+                            self.show_game_over()
+                            self.game_running = False
+                            return "quit"
+                    # Update display after each step
+                    self.world.display_viewport()
+                    self.player.draw(self.world.screen, player_screen_x, player_screen_y)
+                    pygame.display.flip()
+                    pygame.time.delay(100)  # Small delay between steps
+        
+        return "continue"
 
     def battle(self, enemy):
         self.current_enemy = enemy
@@ -441,27 +363,49 @@ class Game:
             self.message_time = time.time()
 
     def run(self):
-        self.message = "Welcome to Simple RPG! Click to move, Q to quit"
-        self.message_time = time.time()
+        """Main game loop"""
+        self.game_running = True
+        clock = pygame.time.Clock()
         
         while self.game_running:
-            if not self.in_combat:
-                # Create a dummy event for the initial call
-                dummy_event = pygame.event.Event(pygame.KEYDOWN, {'key': 0})
-                result = self.handle_movement(dummy_event)
-                if result is None:
+            # Handle events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.game_running = False
                     break
-                if result:
-                    enemy = self.create_enemy()
-                    self.battle(enemy)
-                    if not self.player.is_alive():
-                        self.show_game_over()
+                elif event.type == pygame.VIDEORESIZE:
+                    self.world.handle_resize((event.w, event.h))
+                else:
+                    result = self.handle_movement(event)
+                    if result == "quit":
+                        self.game_running = False
                         break
-            else:
-                self.draw_combat_screen()
-                time.sleep(0.1)
+            
+            # Update game state
+            if not self.show_inventory:
+                if self.show_sprite_debug:
+                    # Only draw sprite debug view when in debug mode
+                    self.world.sprite_debug_window.draw(self.world.screen)
+                else:
+                    # Only draw game world when not in debug mode
+                    self.world.display_viewport()
+                    
+                    # Calculate player screen position
+                    player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+                    player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+                    
+                    # Draw player at center of viewport
+                    self.player.draw(self.world.screen, player_screen_x, player_screen_y)
+                
+                # Update display
+                pygame.display.flip()
+            
+            # Cap the frame rate
+            clock.tick(60)
         
-        self.show_game_over()
+        # Clean up
+        if self.world.sprite_debug_window.is_open:
+            self.world.sprite_debug_window.close()
         pygame.quit()
 
     def show_game_over(self):

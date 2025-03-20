@@ -1,9 +1,211 @@
 import pygame
 import random
 import time
+import os
 from utils.constants import WINDOW_SIZE, WHITE, BLACK, WINDOW_TITLE
 from game.sprites import sprite_manager, GameSprite
 from utils.helpers import load_sprite_mappings
+
+class SpriteDebugWindow:
+    def __init__(self):
+        """Initialize the sprite debug window"""
+        self.window_width = 800
+        self.window_height = 600
+        self.sprite_debug_scroll = 0
+        self.max_scroll = 0
+        self._sprite_cache_initialized = False
+        self._cached_tiles = []
+        self._cached_overlays = {}
+        self._last_debug_print = 0
+        self.is_open = False
+    
+    def open(self):
+        """Open the sprite debug view"""
+        if not self.is_open:
+            self.is_open = True
+            self._calculate_max_scroll()
+    
+    def close(self):
+        """Close the sprite debug view"""
+        self.is_open = False
+    
+    def handle_event(self, event):
+        """Handle events for the sprite debug view"""
+        if not self.is_open:
+            return False
+        
+        # Handle keyboard events for scrolling
+        if event.type == pygame.KEYDOWN:
+            if event.key in [pygame.K_UP, pygame.K_w]:
+                self.sprite_debug_scroll = max(0, self.sprite_debug_scroll - 50)
+                return True
+            elif event.key in [pygame.K_DOWN, pygame.K_s]:
+                self.sprite_debug_scroll = min(self.max_scroll, self.sprite_debug_scroll + 50)
+                return True
+            elif event.key == pygame.K_PAGEUP:
+                self.sprite_debug_scroll = max(0, self.sprite_debug_scroll - 200)
+                return True
+            elif event.key == pygame.K_PAGEDOWN:
+                self.sprite_debug_scroll = min(self.max_scroll, self.sprite_debug_scroll + 200)
+                return True
+            elif event.key == pygame.K_HOME:
+                self.sprite_debug_scroll = 0
+                return True
+            elif event.key == pygame.K_END:
+                self.sprite_debug_scroll = self.max_scroll
+                return True
+            elif event.key == pygame.K_ESCAPE or event.key == pygame.K_SPACE:
+                self.close()
+                return True
+        
+        # Handle mouse wheel scrolling
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 4:  # Mouse wheel up
+                self.sprite_debug_scroll = max(0, self.sprite_debug_scroll - 50)
+                return True
+            elif event.button == 5:  # Mouse wheel down
+                self.sprite_debug_scroll = min(self.max_scroll, self.sprite_debug_scroll + 50)
+                return True
+            elif event.button == 1:  # Left click
+                # Check if click is on scroll bar
+                if self.window_width - 20 <= event.pos[0] <= self.window_width:
+                    if 60 <= event.pos[1] <= self.window_height - 80:
+                        scroll_height = self.window_height - 140
+                        click_ratio = (event.pos[1] - 60) / scroll_height
+                        self.sprite_debug_scroll = int(click_ratio * self.max_scroll)
+                        return True
+        
+        return False
+    
+    def draw(self, screen):
+        """Draw the sprite debug view contents"""
+        if not self.is_open:
+            return
+        
+        # Store current window dimensions
+        self.window_width = screen.get_width()
+        self.window_height = screen.get_height()
+        
+        # Clear the screen first
+        screen.fill((0, 0, 0))
+        
+        # Draw header
+        font = pygame.font.Font(None, 28)
+        small_font = pygame.font.Font(None, 20)
+        text = font.render("Sprite Debug View (ESC/SPACE to close)", True, (255, 255, 255))
+        screen.blit(text, (10, 10))
+        
+        # Start position for drawing sprites
+        x = 10
+        y = 40 - self.sprite_debug_scroll
+        
+        # Draw base terrain tiles
+        text = font.render("Base Terrain:", True, (255, 255, 255))
+        if y + 30 > 0 and y < self.window_height:
+            screen.blit(text, (x, y))
+        y += 30
+        
+        # Get base terrain tiles
+        base_tiles = sprite_manager._cached_base_tiles
+        row_start_y = y
+        
+        for sprite_name, sprite in base_tiles.items():
+            if y + sprite.rect.height + 20 > 0 and y < self.window_height:
+                # Draw sprite name
+                text = small_font.render(sprite_name, True, (255, 255, 255))
+                text_rect = text.get_rect()
+                text_rect.centerx = x + sprite.rect.width // 2
+                text_rect.bottom = y + 15
+                screen.blit(text, text_rect)
+                
+                # Draw sprite
+                sprite_copy = sprite.copy()
+                sprite_copy.rect.x = x
+                sprite_copy.rect.y = y + 20
+                screen.blit(sprite_copy.image, sprite_copy.rect)
+            
+            x += sprite.rect.width + 15
+            if x + sprite.rect.width > self.window_width - 15:
+                x = 10
+                y = row_start_y + sprite.rect.height + 40
+                row_start_y = y
+        
+        y = row_start_y + sprite.rect.height + 40
+        
+        # Draw overlay sections
+        overlay_categories = {
+            "Trees": ["pine", "oak", "dead"],
+            "Rocks": ["boulder", "stone", "crystal"],
+            "Bushes": ["small", "berry", "flower"]
+        }
+        
+        for category, sprite_types in overlay_categories.items():
+            if y + 30 > 0 and y < self.window_height:
+                x = 10
+                text = font.render(f"{category}:", True, (255, 255, 255))
+                screen.blit(text, (x, y))
+            y += 30
+            row_start_y = y
+            
+            for sprite_type in sprite_types:
+                sprite = sprite_manager.get_overlay_sprite(category, sprite_type)
+                if sprite and y + sprite.rect.height + 20 > 0 and y < self.window_height:
+                    # Draw sprite name
+                    text = small_font.render(sprite_type, True, (255, 255, 255))
+                    text_rect = text.get_rect()
+                    text_rect.centerx = x + sprite.rect.width // 2
+                    text_rect.bottom = y + 15
+                    screen.blit(text, text_rect)
+                    
+                    # Draw sprite
+                    sprite.rect.x = x
+                    sprite.rect.y = y + 20
+                    screen.blit(sprite.image, sprite.rect)
+                
+                x += sprite.rect.width + 15
+                if x + sprite.rect.width > self.window_width - 15:
+                    x = 10
+                    y = row_start_y + sprite.rect.height + 40
+                    row_start_y = y
+            
+            y = row_start_y + sprite.rect.height + 40
+        
+        # Draw scroll bar if needed
+        if y + self.sprite_debug_scroll > self.window_height:
+            scroll_bar_height = int((self.window_height / (y + self.sprite_debug_scroll)) * self.window_height)
+            scroll_bar_pos = int((self.sprite_debug_scroll / (y - self.window_height)) * (self.window_height - scroll_bar_height))
+            pygame.draw.rect(screen, (200, 200, 200), 
+                           (self.window_width - 15, 0, 15, self.window_height))
+            pygame.draw.rect(screen, (100, 100, 100), 
+                           (self.window_width - 15, scroll_bar_pos, 15, scroll_bar_height))
+        
+        # Update the display
+        pygame.display.flip()
+    
+    def _calculate_max_scroll(self):
+        """Calculate the maximum scroll distance based on content height"""
+        if not self._sprite_cache_initialized:
+            self._sprite_cache_initialized = True
+            self._cached_tiles = sprite_manager.get_available_tiles()
+            self._cached_overlays = {}
+        
+        sprite_size = 32
+        sprites_per_row = max(1, (self.window_width - 40) // (sprite_size + 10))
+        row_height = sprite_size + 20
+        visible_height = self.window_height - 40
+        
+        terrain_rows = (len(self._cached_tiles) + sprites_per_row - 1) // sprites_per_row
+        terrain_height = terrain_rows * row_height + 90
+        
+        overlay_height = 0
+        for category, sprites in self._cached_overlays.items():
+            if not sprites:
+                continue
+            rows = (len(sprites) + sprites_per_row - 1) // sprites_per_row
+            overlay_height += rows * row_height + 70
+        
+        total_height = terrain_height + overlay_height
+        self.max_scroll = max(0, total_height - visible_height)
 
 class World:
     def __init__(self, player):
@@ -13,16 +215,8 @@ class World:
         self.screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE), pygame.RESIZABLE)
         pygame.display.set_caption(WINDOW_TITLE)
         
-        # Initialize sprite debug variables
-        self.show_sprite_debug = False
-        self.selected_sprite = None
-        self.sprite_debug_scroll = 0
-        self.max_scroll = 0  # Will be calculated based on content
-        self._sprite_cache_initialized = False
-        self._cached_tiles = []
-        self._cached_overlays = {}
-        self.window_width = WINDOW_SIZE
-        self.window_height = WINDOW_SIZE
+        # Create sprite debug window
+        self.sprite_debug_window = SpriteDebugWindow()
         
         # Initialize sprite manager
         sprite_manager.initialize()
@@ -30,26 +224,20 @@ class World:
         # Load sprite mappings if they exist
         load_sprite_mappings()
         
-        # Create player character
-        self.player = player
-        
         # Initialize world state
+        self.player = player
         self.player_x = 0
         self.player_y = 0
         self.world_map = {}
         self.CELL_SIZE = 32
-        self.VIEWPORT_SIZE = self.window_width // self.CELL_SIZE
-        
-        # Initialize debug flags
-        self.show_debug = False
+        self.VIEWPORT_SIZE = WINDOW_SIZE // self.CELL_SIZE
+        self.window_width = WINDOW_SIZE
+        self.window_height = WINDOW_SIZE
         
         # Generate initial world
         self.generate_world()
         
-        # Calculate initial max scroll
-        self._calculate_max_scroll()
-        
-        print("World initialized")  # Debug print
+        print("World initialized")
 
     def handle_resize(self, size):
         """Handle window resize events"""
@@ -58,151 +246,17 @@ class World:
         self.VIEWPORT_SIZE = self.window_width // self.CELL_SIZE
         self._calculate_max_scroll()
 
-    def draw_sprite_debug(self):
-        """Draw the sprite debug view"""
-        # Clear the screen
-        self.screen.fill((255, 255, 255))
-        
-        # Get available sprites
-        base_tiles = sprite_manager.get_available_tiles()
-        overlays = sprite_manager.get_available_overlays()
-        
-        # Set up font
-        font = pygame.font.Font(None, 24)
-        
-        # Draw header (fixed position)
-        header = font.render("Sprite Debug View", True, (0, 0, 0))
-        subheader = font.render("Click a sprite to select it", True, (0, 0, 0))
-        self.screen.blit(header, (10, 10))
-        self.screen.blit(subheader, (10, 35))
-        
-        # Start position for drawing sprites (adjusted for scroll)
-        x = 10
-        y = 70 - self.sprite_debug_scroll
-        row_height = 40
-        
-        # Calculate sprites per row based on window width
-        sprites_per_row = max(1, (self.window_width - 40) // 40)
-        
-        # Draw base terrain tiles section
-        terrain_label = font.render("Base Terrain:", True, (0, 0, 0))
-        if y + 30 > 60 and y < self.window_height:  # Only draw if visible
-            self.screen.blit(terrain_label, (x, y))
-        y += 30
-        
-        # Draw terrain tiles
-        row_x = x
-        for sprite in base_tiles:
-            if y > -40 and y < self.window_height:  # Only draw if in view
-                if sprite.image:
-                    self.screen.blit(sprite.image, (row_x, y))
-            row_x += 40
-            if row_x > self.window_width - 40:
-                row_x = x
-                y += row_height
-        
-        if row_x != x:  # If the last row wasn't full
-            y += row_height
-        
-        # Draw overlay sections
-        for category, sprites in overlays.items():
-            # Draw category label
-            category_label = font.render(f"{category}:", True, (0, 0, 0))
-            if y + 30 > 60 and y < self.window_height:  # Only draw if visible
-                self.screen.blit(category_label, (x, y))
-            y += 30
-            
-            # Draw sprites in this category
-            row_x = x
-            for sprite in sprites:
-                if y > -40 and y < self.window_height:  # Only draw if in view
-                    if sprite.image:
-                        self.screen.blit(sprite.image, (row_x, y))
-                row_x += 40
-                if row_x > self.window_width - 40:
-                    row_x = x
-                    y += row_height
-            
-            if row_x != x:  # If the last row wasn't full
-                y += row_height
-            y += 20  # Add spacing between categories
-        
-        # Draw scroll bar if needed
-        total_height = y + self.sprite_debug_scroll
-        if total_height > self.window_height:
-            bar_height = max(40, self.window_height * self.window_height / total_height)
-            bar_pos = (self.sprite_debug_scroll / (total_height - self.window_height)) * (self.window_height - bar_height)
-            pygame.draw.rect(self.screen, (200, 200, 200), 
-                           (self.window_width - 20, 60, 20, self.window_height - 80))
-            pygame.draw.rect(self.screen, (100, 100, 100), 
-                           (self.window_width - 18, 60 + bar_pos, 16, bar_height))
-        
-        # Update the max scroll value
-        self.max_scroll = max(0, total_height - self.window_height + 60)
-        
-        # Update the display
-        pygame.display.flip()
-
     def handle_sprite_debug_click(self, pos, event):
-        """Handle clicks and keyboard events in sprite debug view"""
-        # Rate limit debug prints to once per second
-        current_time = time.time()
-        if not hasattr(self, '_last_debug_print'):
-            self._last_debug_print = 0
-        
-        def debug_print(message):
-            if current_time - self._last_debug_print >= 1.0:
-                print(message)
-                self._last_debug_print = current_time
-        
-        # Handle keyboard events for scrolling
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_UP or event.key == pygame.K_w:
-                debug_print("Scrolling up")
-                self.sprite_debug_scroll = max(0, self.sprite_debug_scroll - 50)
-                return True
-            elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
-                debug_print("Scrolling down")
-                self.sprite_debug_scroll = min(self.max_scroll, self.sprite_debug_scroll + 50)
-                return True
-            elif event.key == pygame.K_PAGEUP:
-                debug_print("Page up")
-                self.sprite_debug_scroll = max(0, self.sprite_debug_scroll - 200)
-                return True
-            elif event.key == pygame.K_PAGEDOWN:
-                debug_print("Page down")
-                self.sprite_debug_scroll = min(self.max_scroll, self.sprite_debug_scroll + 200)
-                return True
-            elif event.key == pygame.K_HOME:
-                debug_print("Jump to top")
-                self.sprite_debug_scroll = 0
-                return True
-            elif event.key == pygame.K_END:
-                debug_print("Jump to bottom")
-                self.sprite_debug_scroll = self.max_scroll
-                return True
-        
-        # Handle mouse wheel scrolling
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 4:  # Mouse wheel up
-                debug_print("Mouse wheel up")
-                self.sprite_debug_scroll = max(0, self.sprite_debug_scroll - 50)
-                return True
-            elif event.button == 5:  # Mouse wheel down
-                debug_print("Mouse wheel down")
-                self.sprite_debug_scroll = min(self.max_scroll, self.sprite_debug_scroll + 50)
-                return True
-            elif event.button == 1:  # Left click
-                # Check if click is on scroll bar
-                if self.window_width - 20 <= pos[0] <= self.window_width:
-                    if 60 <= pos[1] <= self.window_height - 80:
-                        debug_print("Click on scroll bar")
-                        scroll_height = self.window_height - 140
-                        click_ratio = (pos[1] - 60) / scroll_height
-                        self.sprite_debug_scroll = int(click_ratio * self.max_scroll)
-                        return True
-        
+        """Forward sprite debug events to the debug window"""
+        if self.sprite_debug_window.is_open:
+            return self.sprite_debug_window.handle_event(event)
         return False
+
+    def draw_sprite_debug(self, screen):
+        """Draw the sprite debug window"""
+        if not self.sprite_debug_window.is_open:
+            self.sprite_debug_window.open()
+        self.sprite_debug_window.draw(screen)
 
     def draw_text(self, text, position, color, font_size=24):
         """Helper method to draw text on the screen with custom font size"""
@@ -449,12 +503,10 @@ class World:
                 current_x += 1
             elif current_x > target_x:
                 current_x -= 1
-            
-            if current_y < target_y:
+            elif current_y < target_y:
                 current_y += 1
             elif current_y > target_y:
                 current_y -= 1
-            
             path.append((current_x, current_y))
         
         return path
