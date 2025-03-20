@@ -8,6 +8,7 @@ from utils.constants import (
 )
 from utils.helpers import play_sound, save_game, load_game, load_sprite_mappings
 from entities.character import Character
+from game.combat import CombatSystem
 from entities.items import Item, Inventory
 from ui.console import MessageConsole
 from game.world import World
@@ -15,51 +16,39 @@ from game.sprites import sprite_manager
 
 class Game:
     def __init__(self):
-        # Initialize Pygame display first
+        """Initialize the game"""
+        # Initialize Pygame and set up display first
         pygame.init()
-        pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE))
-        pygame.display.set_caption(WINDOW_TITLE)
+        self.screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE))
+        pygame.display.set_caption("Simple RPG")
         
-        # Initialize sprite manager
-        sprite_manager.initialize()
+        # Initialize font
+        self.font = pygame.font.Font(None, 24)
         
-        # Load sprite mappings if they exist
-        load_sprite_mappings()
+        # Initialize clock
+        self.clock = pygame.time.Clock()
         
-        # Debug view flags
-        self.show_debug = False
-        self.show_sprite_debug = False
+        # Initialize message console
+        self.message_console = MessageConsole(max_messages=6)
         
-        # Create player character
-        self.player = Character(
-            name="Hero",
-            health=100,
-            attack=10,
-            character_type='player'
-        )
-        
-        # Create world with player
-        self.world = World(self.player)
-        self.world.show_debug = self.show_debug
-        self.world.show_sprite_debug = self.show_sprite_debug
-        
-        # Create message console
-        self.console = MessageConsole()
+        print("Game initialized")
         
         # Game state
         self.running = True
         self.in_combat = False
         self.current_enemy = None
-        self.combat_options = [
-            "Attack",
-            "Strong Attack",
-            "Heal",
-            "Flee"
-        ]
-        self.selected_option = 0
+        self.sprite_debug_active = False
+        self.show_inventory = False
+               
+        # Debug view flags
+        self.show_debug = False
+        self.show_sprite_debug = False
         
-        # Add message console
-        self.message_console = MessageConsole(max_messages=6)
+        # Initialize sprite manager (after display is set up)
+        sprite_manager.initialize()
+        
+        # Load sprite mappings if they exist
+        load_sprite_mappings()
         
         # Try to load saved game
         save_data = load_game()
@@ -68,12 +57,14 @@ class Game:
             self.player = Character(
                 save_data["player"]["name"],
                 health=save_data["player"]["max_health"],
-                attack=save_data["player"]["attack"]
+                attack=save_data["player"]["attack"],
+                character_type='player'
             )
             # Restore player stats
             self.player.health = save_data["player"]["health"]
             self.player.level = save_data["player"]["level"]
             self.player.exp = save_data["player"]["exp"]
+            self.player.exp_to_next_level = save_data["player"].get("exp_to_next_level", 100)
             self.player.max_health = save_data["player"]["max_health"]
             self.player.attack = save_data["player"]["attack"]
             # Restore kill stats
@@ -87,43 +78,59 @@ class Game:
                     if item_data:
                         self.player.equipment[slot] = Item.from_dict(item_data)
         else:
-            self.player = Character("Hero")
-        
-        self.enemies = ["Goblin", "Orc", "Troll", "Dragon"]
-        self.game_running = True
-        self.show_inventory = False
+            # Create new player character
+            self.player = Character(
+                name="Hero",
+                health=100,
+                attack=10,
+                character_type='player'
+            )
+            # Initialize XP system (these should be set in Character.__init__ but let's make sure)
+            self.player.level = 1
+            self.player.exp = 0
+            self.player.exp_to_next_level = 100
         
         # Initialize world with player
         self.world = World(self.player)
+        self.world.show_debug = self.show_debug
+        self.world.show_sprite_debug = self.show_sprite_debug
+        self.world.screen = self.screen  # Share the screen surface
         
         # Restore player position if save exists
         if save_data and "world" in save_data:
             self.world.player_x = save_data["world"].get("player_x", 0)
             self.world.player_y = save_data["world"].get("player_y", 0)
         
-        # Initialize game state
-        self.in_combat = False
-        self.current_enemy = None
-        self.combat_animation_frame = 0
-        self.combat_animation_speed = 0.2
-        self.message = "Click to move, Q to quit"
-        self.message_time = 0
-        self.message_duration = 3  # seconds
+        # Combat options
+        self.combat_options = [
+            "Attack",
+            "Strong Attack",
+            "Heal",
+            "Flee"
+        ]
+        self.selected_option = 0
+        
+        # Enemy types
+        self.enemies = ["Goblin", "Orc", "Troll", "Dragon"]
         
         # Display initial viewport
         self.world.display_viewport()
-        print("Game initialized")  # Debug print
+        print("Game initialization complete")
+        
+        # Initialize combat system
+        self.combat_system = CombatSystem(self)
 
     def create_enemy(self):
+        """Create a random enemy with appropriate stats"""
         enemy_name = random.choice(self.enemies)
         if enemy_name == "Dragon":
-            return Character(enemy_name, health=150, attack=20)
+            return Character(enemy_name, health=150, attack=20, character_type='enemy')
         elif enemy_name == "Troll":
-            return Character(enemy_name, health=100, attack=15)
+            return Character(enemy_name, health=100, attack=15, character_type='enemy')
         elif enemy_name == "Orc":
-            return Character(enemy_name, health=80, attack=12)
+            return Character(enemy_name, health=80, attack=12, character_type='enemy')
         else:  # Goblin
-            return Character(enemy_name, health=50, attack=8)
+            return Character(enemy_name, health=50, attack=8, character_type='enemy')
 
     def handle_inventory_input(self, event):
         """Handle input while inventory is open"""
@@ -131,31 +138,21 @@ class Game:
             if event.key == pygame.K_i:  # Close inventory
                 self.show_inventory = False
             elif event.key == pygame.K_u:  # Unequip menu
-                self.message = "Press 1 for weapon, 2 for armor"
                 self.message_console.add_message("Press 1 for weapon, 2 for armor")
-                self.message_time = time.time()
-            elif event.key in [pygame.K_1, pygame.K_2] and self.message.startswith("Press 1 for"):
-                # Handle unequipping
+            elif event.key in [pygame.K_1, pygame.K_2]:  # Changed condition to remove message.startswith check
                 slot = "weapon" if event.key == pygame.K_1 else "armor"
                 if self.player.unequip_item(slot):
-                    self.message = f"Unequipped {slot}"
                     self.message_console.add_message(f"Unequipped {slot}")
                 else:
-                    self.message = f"No {slot} to unequip"
                     self.message_console.add_message(f"No {slot} to unequip")
-                self.message_time = time.time()
             elif pygame.K_1 <= event.key <= pygame.K_9:
-                # Try to equip/use item
                 item_index = event.key - pygame.K_1
                 if item_index < len(self.player.inventory.items):
                     item = self.player.inventory.items[item_index]
                     if self.player.equip_item(item_index):
-                        self.message = f"Equipped {item.name}"
                         self.message_console.add_message(f"Equipped {item.name}")
                     else:
-                        self.message = f"Cannot equip {item.name}"
                         self.message_console.add_message(f"Cannot equip {item.name}")
-                    self.message_time = time.time()
 
     def handle_movement(self, event):
         """Handle player movement and game state updates"""
@@ -172,6 +169,10 @@ class Game:
                 self.world.sprite_debug_window.close()
             return "continue"
         
+        # Don't handle movement if in combat
+        if self.in_combat:
+            return "continue"
+        
         # Forward only relevant events to sprite debug window if it's open
         if self.show_sprite_debug:
             if event.type in [pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN]:
@@ -181,24 +182,25 @@ class Game:
         
         # Handle regular game controls when not in sprite debug
         if event.type == pygame.KEYDOWN:
+            moved = False
             if event.key == pygame.K_LEFT:
-                if self.world.move_player(self.world.player_x - 1, self.world.player_y):
-                    enemy = self.create_enemy()
-                    self.battle(enemy)
+                moved = self.world.move_player(self.world.player_x - 1, self.world.player_y)
             elif event.key == pygame.K_RIGHT:
-                if self.world.move_player(self.world.player_x + 1, self.world.player_y):
-                    enemy = self.create_enemy()
-                    self.battle(enemy)
+                moved = self.world.move_player(self.world.player_x + 1, self.world.player_y)
             elif event.key == pygame.K_UP:
-                if self.world.move_player(self.world.player_x, self.world.player_y - 1):
-                    enemy = self.create_enemy()
-                    self.battle(enemy)
+                moved = self.world.move_player(self.world.player_x, self.world.player_y - 1)
             elif event.key == pygame.K_DOWN:
-                if self.world.move_player(self.world.player_x, self.world.player_y + 1):
-                    enemy = self.create_enemy()
-                    self.battle(enemy)
+                moved = self.world.move_player(self.world.player_x, self.world.player_y + 1)
             elif event.key == pygame.K_ESCAPE:
                 return "quit"
+                
+            # Only create enemy if we successfully moved and aren't in combat
+            if moved and not self.in_combat:
+                # 30% chance to encounter an enemy when moving
+                if random.random() < 0.3:
+                    enemy = self.create_enemy()
+                    self.battle(enemy)
+                    
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.show_sprite_debug:  # Left click
             # Get click position relative to viewport
             click_x, click_y = event.pos
@@ -211,16 +213,19 @@ class Game:
             
             # Get path to clicked location
             path = self.world.get_path_to(world_x, world_y)
-            if path:
+            if path and not self.in_combat:
                 # Move along the path
                 for next_x, next_y in path:
                     if self.world.move_player(next_x, next_y):
-                        enemy = self.create_enemy()
-                        self.battle(enemy)
-                        if not self.player.is_alive():
-                            self.show_game_over()
-                            self.game_running = False
-                            return "quit"
+                        # 30% chance to encounter an enemy when moving
+                        if random.random() < 0.3:
+                            enemy = self.create_enemy()
+                            self.battle(enemy)
+                            if not self.player.is_alive():
+                                self.show_game_over()
+                                self.game_running = False
+                                return "quit"
+                            break  # Stop moving if we encounter an enemy
                     # Update display after each step
                     self.world.display_viewport()
                     self.player.draw(self.world.screen, player_screen_x, player_screen_y)
@@ -228,93 +233,6 @@ class Game:
                     pygame.time.delay(100)  # Small delay between steps
         
         return "continue"
-
-    def battle(self, enemy):
-        self.current_enemy = enemy
-        self.in_combat = True
-        self.message = f"A {enemy.name} appears!"
-        self.message_console.add_message(f"A {enemy.name} appears!")
-        self.message_time = time.time()
-        
-        while enemy.is_alive() and self.player.is_alive():
-            self.draw_combat_screen()
-            
-            # Handle input
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.game_running = False
-                    return
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1:  # Left click
-                        # Check if console button was clicked
-                        padding = 10
-                        console_width = WINDOW_SIZE // 3
-                        console_height = WINDOW_SIZE // 4
-                        console_x = WINDOW_SIZE - console_width - padding
-                        console_y = WINDOW_SIZE - console_height - padding
-                        console_rect = pygame.Rect(console_x, console_y, console_width, console_height)
-                        
-                        if self.message_console.toggle_collapse(event.pos, console_rect):
-                            continue  # Skip combat handling if console was clicked
-                elif event.type == pygame.KEYDOWN:
-                    if event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]:
-                        choice = event.key - pygame.K_1 + 1
-                        # Process combat choice
-                        if choice == 1:  # Regular attack
-                            damage = self.player.attack_target(enemy)
-                            self.last_player_damage = damage
-                            self.message = f"You deal {damage} damage to {enemy.name}"
-                            self.message_console.add_message(f"You deal {damage} damage to {enemy.name}")
-                            self.combat_animation_frame = 1
-                        elif choice == 2:  # Strong attack
-                            damage = self.player.strong_attack(enemy)
-                            self.last_player_damage = damage
-                            self.message = f"Strong attack! {damage} damage to {enemy.name}"
-                            self.message_console.add_message(f"Strong attack! {damage} damage to {enemy.name}")
-                            self.combat_animation_frame = 1
-                        elif choice == 3:  # Heal
-                            heal_amount = self.player.heal()
-                            self.message = f"You heal for {heal_amount} HP"
-                            self.message_console.add_message(f"You heal for {heal_amount} HP")
-                        else:  # Flee
-                            play_sound(SOUND_FLEE)
-                            if random.random() < 0.5:
-                                self.message = "You successfully fled!"
-                                self.message_console.add_message("You successfully fled!")
-                                self.in_combat = False
-                                return
-                            else:
-                                self.message = "Failed to flee!"
-                                self.message_console.add_message("Failed to flee!")
-                        
-                        self.message_time = time.time()
-                        
-                        if not enemy.is_alive():
-                            self.handle_enemy_defeat(enemy)
-                            break
-                        
-                        # Enemy's turn
-                        damage = enemy.attack_target(self.player)
-                        self.last_enemy_damage = damage
-                        self.message = f"{enemy.name} deals {damage} damage to you"
-                        self.message_console.add_message(f"{enemy.name} deals {damage} damage to you")
-                        self.combat_animation_frame = 11
-                        
-                        if not self.player.is_alive():
-                            self.message = "You have been defeated!"
-                            self.message_console.add_message("You have been defeated!")
-                            play_sound(SOUND_PLAYER_DEFEAT)
-                            self.game_running = False
-                            break
-            
-            # Draw message at the bottom
-            if time.time() - self.message_time < self.message_duration:
-                self.world.draw_text(self.message, (10, WINDOW_SIZE - 30), WHITE)
-            pygame.display.flip()
-            time.sleep(0.1)
-        
-        self.in_combat = False
-        self.world.display_viewport()
 
     def handle_enemy_defeat(self, enemy):
         """Handle enemy defeat, including loot and experience"""
@@ -332,9 +250,7 @@ class Game:
                 if self.player.inventory.add_item(item):
                     loot_message.append(item.name)
                 else:
-                    self.message = "Inventory full! Some items were lost!"
                     self.message_console.add_message("Inventory full! Some items were lost!")
-                    self.message_time = time.time()
         
         # Determine XP reward based on enemy type
         xp_reward = {
@@ -346,22 +262,17 @@ class Game:
         
         # Display victory message with loot
         if loot_message:
-            self.message = f"Defeated! Found: {', '.join(loot_message)}! +{xp_reward} XP!"
             self.message_console.add_message(f"Defeated! Found: {', '.join(loot_message)}! +{xp_reward} XP!")
         else:
-            self.message = f"Defeated! No loot found. +{xp_reward} XP!"
             self.message_console.add_message(f"Defeated! No loot found. +{xp_reward} XP!")
         
         play_sound(SOUND_ENEMY_DEFEAT)
         self.player.gain_exp(xp_reward)
-        self.message_time = time.time()
         
         # Autosave after successful fight
         if save_game(self.player, self.world):
             time.sleep(1)  # Wait a bit so player can read loot message
-            self.message = "Game autosaved!"
             self.message_console.add_message("Game autosaved!")
-            self.message_time = time.time()
 
     def run(self):
         """Main game loop"""
@@ -383,7 +294,9 @@ class Game:
                         break
             
             # Update game state
-            if not self.show_inventory:
+            if self.show_inventory:
+                self.draw_inventory_screen()
+            else:
                 if self.show_sprite_debug:
                     # Only draw sprite debug view when in debug mode
                     self.world.sprite_debug_window.draw(self.world.screen)
@@ -397,9 +310,9 @@ class Game:
                     
                     # Draw player at center of viewport
                     self.player.draw(self.world.screen, player_screen_x, player_screen_y)
-                
-                # Update display
-                pygame.display.flip()
+            
+            # Update display
+            pygame.display.flip()
             
             # Cap the frame rate
             clock.tick(60)
@@ -521,88 +434,47 @@ class Game:
         
         return loot
 
+    def draw_text(self, text, x, y, color=WHITE):
+        """Draw text on the screen"""
+        text_surface = self.font.render(text, True, color)
+        self.screen.blit(text_surface, (x, y))
+
     def draw_combat_screen(self):
-        """Draw the combat screen with enemy and player stats"""
-        # Draw HP bars at the top
-        hp_bar_width = 300
-        hp_bar_height = 25
-        padding = 10
+        """Draw the combat screen"""
+        # Draw the game world in the background
+        self.world.display_viewport()
         
-        # Draw player HP bar first (on top)
-        player_hp_percent = self.player.health / self.player.max_health
-        player_hp_color = (0, 255, 0) if player_hp_percent > 0.5 else (255, 255, 0) if player_hp_percent > 0.2 else (255, 0, 0)
+        # Create a semi-transparent overlay
+        overlay = pygame.Surface((WINDOW_SIZE, WINDOW_SIZE))
+        overlay.fill((0, 0, 0))
+        overlay.set_alpha(128)  # 50% opacity
+        self.screen.blit(overlay, (0, 0))
         
-        # Draw player HP bar background
-        pygame.draw.rect(self.world.screen, (200, 200, 200), 
-                        (padding, padding, hp_bar_width, hp_bar_height))
-        # Draw player HP bar fill
-        pygame.draw.rect(self.world.screen, player_hp_color,
-                        (padding, padding, hp_bar_width * player_hp_percent, hp_bar_height))
-        # Draw player HP bar border
-        pygame.draw.rect(self.world.screen, (255, 255, 255),
-                        (padding, padding, hp_bar_width, hp_bar_height), 1)
+        # Calculate player screen position
+        player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+        player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
         
-        # Draw player name
-        player_name = self.player.name
-        name_surface = pygame.font.Font(None, 24).render(player_name, True, (0, 0, 0))
-        name_rect = name_surface.get_rect()
-        name_rect.x = padding + 5
-        name_rect.centery = padding + hp_bar_height // 2
-        self.world.screen.blit(name_surface, name_rect)
-        
-        # Draw player HP text
-        player_hp_text = f"{self.player.health}/{self.player.max_health}"
-        hp_surface = pygame.font.Font(None, 24).render(player_hp_text, True, (0, 0, 0))
-        hp_rect = hp_surface.get_rect()
-        hp_rect.right = padding + hp_bar_width - 5
-        hp_rect.centery = padding + hp_bar_height // 2
-        self.world.screen.blit(hp_surface, hp_rect)
-        
-        # Draw enemy HP bar second (below player)
-        enemy_hp_percent = self.current_enemy.health / self.current_enemy.max_health
-        enemy_hp_color = (0, 255, 0) if enemy_hp_percent > 0.5 else (255, 255, 0) if enemy_hp_percent > 0.2 else (255, 0, 0)
-        
-        # Draw enemy HP bar background
-        pygame.draw.rect(self.world.screen, (200, 200, 200), 
-                        (padding, padding + hp_bar_height + 5, hp_bar_width, hp_bar_height))
-        # Draw enemy HP bar fill
-        pygame.draw.rect(self.world.screen, enemy_hp_color,
-                        (padding, padding + hp_bar_height + 5, hp_bar_width * enemy_hp_percent, hp_bar_height))
-        # Draw enemy HP bar border
-        pygame.draw.rect(self.world.screen, (255, 255, 255),
-                        (padding, padding + hp_bar_height + 5, hp_bar_width, hp_bar_height), 1)
-        
-        # Draw enemy name
-        enemy_name = self.current_enemy.name
-        name_surface = pygame.font.Font(None, 24).render(enemy_name, True, (0, 0, 0))
-        name_rect = name_surface.get_rect()
-        name_rect.x = padding + 5
-        name_rect.centery = padding + hp_bar_height + 5 + hp_bar_height // 2
-        self.world.screen.blit(name_surface, name_rect)
-        
-        # Draw enemy HP text
-        enemy_hp_text = f"{self.current_enemy.health}/{self.current_enemy.max_health}"
-        hp_surface = pygame.font.Font(None, 24).render(enemy_hp_text, True, (0, 0, 0))
-        hp_rect = hp_surface.get_rect()
-        hp_rect.right = padding + hp_bar_width - 5
-        hp_rect.centery = padding + hp_bar_height + 5 + hp_bar_height // 2
-        self.world.screen.blit(hp_surface, hp_rect)
-        
+        # Draw player and enemy
+        self.player.draw(self.screen, player_screen_x - 100, player_screen_y)  # Player on left
+        if self.current_enemy:
+            self.current_enemy.draw(self.screen, player_screen_x + 100, player_screen_y)  # Enemy on right
+            
+        # Draw health bars
+        self.draw_health_bar(self.player, 10, 10)  # Player health bar on left
+        if self.current_enemy:
+            self.draw_health_bar(self.current_enemy, WINDOW_SIZE - 210, 10)  # Enemy health bar on right
+            
         # Draw combat options
-        options = ["[1] Attack", "[2] Strong Attack", "[3] Heal", "[4] Flee"]
-        x = 20
-        y = WINDOW_SIZE - 100  # Position above the console
-        spacing = 150  # Space between options
+        option_text = "Combat Options:"
+        self.draw_text(option_text, 10, 400, WHITE)
+        self.draw_text("1: Attack  2: Strong Attack  3: Heal  4: Flee", 10, 430, WHITE)
         
-        for option in options:
-            text_surface = pygame.font.Font(None, 24).render(option, True, (255, 255, 255))
-            self.world.screen.blit(text_surface, (x, y))
-            x += spacing
+        # Draw message console at the bottom of the screen
+        console_height = 100
+        self.message_console.draw(self.screen, 10, WINDOW_SIZE - console_height - 10, WINDOW_SIZE - 20, console_height)
         
-        # Draw message console at the bottom
-        console_height = 150
-        console_y = WINDOW_SIZE - console_height - 10
-        self.message_console.draw(self.world.screen, 10, console_y, WINDOW_SIZE - 20, console_height)
+        # Update display
+        pygame.display.flip()
 
     def handle_combat(self, enemy):
         """Handle combat with an enemy"""
@@ -670,9 +542,18 @@ class Game:
             self.world.draw_sprite(self.world.screen, self.world.player.x, self.world.player.y, "player")
             self.world.draw_sprite(self.world.screen, enemy.x, enemy.y, enemy.name)
             
-            # Draw health bars
-            self.draw_health_bar(self.world.screen, self.world.player.health, 100, 50, 50, 10)
-            self.draw_health_bar(self.world.screen, enemy.health, 100, 50, 150, 10)
+            # Draw health bars with proper width and height
+            hp_bar_width = 300
+            hp_bar_height = 25
+            padding = 10
+            
+            # Draw player health bar
+            self.draw_health_bar(self.world.screen, self.world.player.health, self.world.player.max_health,
+                               padding, padding, hp_bar_width, hp_bar_height)
+            
+            # Draw enemy health bar
+            self.draw_health_bar(self.world.screen, enemy.health, enemy.max_health,
+                               padding, padding + hp_bar_height + 5, hp_bar_width, hp_bar_height)
             
             # Draw combat messages
             self.draw_combat_messages(combat_messages)
@@ -696,24 +577,38 @@ class Game:
         
         return False
 
-    def draw_health_bar(self, screen, current, maximum, x, y, width, height):
-        """Draw a health bar"""
-        # Background
-        pygame.draw.rect(screen, (100, 100, 100), (x, y, width, height))
+    def draw_health_bar(self, character, x, y):
+        """Draw a health bar for a character"""
+        bar_width = 200
+        bar_height = 20
+        fill = (character.health / character.max_health) * bar_width
         
-        # Health bar
-        health_width = int((current / maximum) * width)
-        health_color = (0, 255, 0) if current > maximum * 0.5 else (255, 165, 0) if current > maximum * 0.25 else (255, 0, 0)
-        pygame.draw.rect(screen, health_color, (x, y, health_width, height))
+        # Draw the background
+        pygame.draw.rect(self.screen, (255, 0, 0), (x, y, bar_width, bar_height))
+        # Draw the fill
+        pygame.draw.rect(self.screen, (0, 255, 0), (x, y, fill, bar_height))
+        # Draw the border
+        pygame.draw.rect(self.screen, (255, 255, 255), (x, y, bar_width, bar_height), 2)
         
-        # Border
-        pygame.draw.rect(screen, (255, 255, 255), (x, y, width, height), 1)
+        # Draw the text
+        health_text = f"{character.name}: {character.health}/{character.max_health} HP"
+        self.draw_text(health_text, x, y - 20)
         
-        # Health text
-        health_text = f"{current}/{maximum}"
-        text_surface = self.font.render(health_text, True, (255, 255, 255))
-        text_rect = text_surface.get_rect(center=(x + width/2, y + height/2))
-        screen.blit(text_surface, text_rect)
+        # Draw XP bar for player character
+        if character == self.world.player:
+            xp_y = y + bar_height + 5
+            xp_fill = (character.exp / (character.level * 100)) * bar_width
+            
+            # Draw the background
+            pygame.draw.rect(self.screen, (100, 100, 100), (x, xp_y, bar_width, bar_height))
+            # Draw the fill
+            pygame.draw.rect(self.screen, (0, 0, 255), (x, xp_y, xp_fill, bar_height))
+            # Draw the border
+            pygame.draw.rect(self.screen, (255, 255, 255), (x, xp_y, bar_width, bar_height), 2)
+            
+            # Draw the text
+            xp_text = f"Level {character.level} - XP: {character.exp}/{character.level * 100}"
+            self.draw_text(xp_text, x, xp_y + bar_height + 5)
 
     def draw_combat_messages(self, messages):
         """Draw combat messages"""
@@ -753,3 +648,13 @@ class Game:
                     if self.world.handle_sprite_debug_click(event.pos):
                         continue
         return True 
+
+    def battle(self, enemy):
+        """Handle battle with an enemy"""
+        self.current_enemy = enemy
+        self.in_combat = True
+        
+        if self.combat_system.handle_battle(enemy):
+            self.combat_system.enemy_turn(enemy)
+            return True
+        return False 
