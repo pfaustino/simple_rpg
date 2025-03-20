@@ -1,6 +1,7 @@
 import pygame
 import time
 import random
+import sys
 from utils.constants import (
     WINDOW_SIZE, WHITE, BLACK, GREEN, SOUND_ENEMY_DEFEAT,
     SOUND_PLAYER_DEFEAT, SOUND_FLEE, WINDOW_TITLE
@@ -602,6 +603,124 @@ class Game:
         console_height = 150
         console_y = WINDOW_SIZE - console_height - 10
         self.message_console.draw(self.world.screen, 10, console_y, WINDOW_SIZE - 20, console_height)
+
+    def handle_combat(self, enemy):
+        """Handle combat with an enemy"""
+        # Initialize combat state
+        combat_active = True
+        current_turn = "player"  # Start with player's turn
+        combat_messages = []
+        
+        # Store original positions
+        original_player_pos = (self.world.player.x, self.world.player.y)
+        original_enemy_pos = (enemy.x, enemy.y)
+        
+        # Create combat surface
+        combat_surface = pygame.Surface((self.world.screen.get_width(), self.world.screen.get_height()))
+        combat_surface.fill((0, 0, 0))  # Black background
+        
+        # Combat loop
+        while combat_active:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        # Allow fleeing from combat
+                        combat_active = False
+                        self.world.player.x, self.world.player.y = original_player_pos
+                        enemy.x, enemy.y = original_enemy_pos
+                        return False
+                    
+                    if current_turn == "player" and event.key == pygame.K_SPACE:
+                        # Player attacks
+                        damage = random.randint(5, 15)
+                        enemy.health -= damage
+                        combat_messages.append(f"You deal {damage} damage to {enemy.name}")
+                        
+                        # Check if enemy is defeated
+                        if enemy.health <= 0:
+                            combat_messages.append(f"{enemy.name} is defeated!")
+                            combat_active = False
+                            return True
+                        
+                        current_turn = "enemy"
+            
+            # Enemy's turn
+            if current_turn == "enemy":
+                # Enemy attacks
+                enemy_damage = random.randint(3, 10)
+                self.world.player.health -= enemy_damage
+                combat_messages.append(f"{enemy.name} deals {enemy_damage} damage to you")
+                
+                # Check if player is defeated
+                if self.world.player.health <= 0:
+                    combat_messages.append("You are defeated!")
+                    combat_active = False
+                    return False
+                
+                current_turn = "player"
+            
+            # Draw combat scene
+            self.world.screen.blit(combat_surface, (0, 0))
+            
+            # Draw combatants
+            self.world.draw_sprite(self.world.screen, self.world.player.x, self.world.player.y, "player")
+            self.world.draw_sprite(self.world.screen, enemy.x, enemy.y, enemy.name)
+            
+            # Draw health bars
+            self.draw_health_bar(self.world.screen, self.world.player.health, 100, 50, 50, 10)
+            self.draw_health_bar(self.world.screen, enemy.health, 100, 50, 150, 10)
+            
+            # Draw combat messages
+            self.draw_combat_messages(combat_messages)
+            
+            # Draw turn indicator
+            turn_text = f"Current Turn: {'Player' if current_turn == 'player' else enemy.name}"
+            text_surface = self.font.render(turn_text, True, (255, 255, 255))
+            self.world.screen.blit(text_surface, (50, 200))
+            
+            # Draw instructions
+            instructions = [
+                "Press SPACE to attack",
+                "Press ESC to flee"
+            ]
+            for i, text in enumerate(instructions):
+                text_surface = self.font.render(text, True, (200, 200, 200))
+                self.world.screen.blit(text_surface, (50, 250 + i * 30))
+            
+            pygame.display.flip()
+            self.clock.tick(60)
+        
+        return False
+
+    def draw_health_bar(self, screen, current, maximum, x, y, width, height):
+        """Draw a health bar"""
+        # Background
+        pygame.draw.rect(screen, (100, 100, 100), (x, y, width, height))
+        
+        # Health bar
+        health_width = int((current / maximum) * width)
+        health_color = (0, 255, 0) if current > maximum * 0.5 else (255, 165, 0) if current > maximum * 0.25 else (255, 0, 0)
+        pygame.draw.rect(screen, health_color, (x, y, health_width, height))
+        
+        # Border
+        pygame.draw.rect(screen, (255, 255, 255), (x, y, width, height), 1)
+        
+        # Health text
+        health_text = f"{current}/{maximum}"
+        text_surface = self.font.render(health_text, True, (255, 255, 255))
+        text_rect = text_surface.get_rect(center=(x + width/2, y + height/2))
+        screen.blit(text_surface, text_rect)
+
+    def draw_combat_messages(self, messages):
+        """Draw combat messages"""
+        # Show last 5 messages
+        for i, message in enumerate(messages[-5:]):
+            text_surface = self.font.render(message, True, (255, 255, 255))
+            self.world.screen.blit(text_surface, (50, 350 + i * 30))
 
     def handle_events(self):
         """Handle all game events"""
