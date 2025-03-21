@@ -13,6 +13,7 @@ from entities.items import Item, Inventory
 from ui.console import MessageConsole
 from game.world import World
 from game.sprites import sprite_manager
+from ui.bar import Bar
 
 class Game:
     def __init__(self):
@@ -119,6 +120,8 @@ class Game:
         
         # Initialize combat system
         self.combat_system = CombatSystem(self)
+        
+        self.bar_renderer = Bar()
 
     def create_enemy(self):
         """Create a random enemy with appropriate stats"""
@@ -460,9 +463,12 @@ class Game:
             self.current_enemy.draw(self.screen, player_screen_x + 100, player_screen_y)  # Enemy on right
             
         # Draw health bars
-        self.draw_health_bar(self.player, 10, 10)  # Player health bar on left
+        Bar.draw_health_bar(self.screen, self.player, 10, 10)  # Player health bar on left
         if self.current_enemy:
-            self.draw_health_bar(self.current_enemy, WINDOW_SIZE - 210, 10)  # Enemy health bar on right
+            Bar.draw_health_bar(self.screen, self.current_enemy, WINDOW_SIZE - 210, 10)  # Enemy health bar on right
+            
+        # Draw XP bar for player
+        Bar.draw_xp_bar(self.screen, self.player, 10, 35)
             
         # Draw combat options
         option_text = "Combat Options:"
@@ -542,18 +548,12 @@ class Game:
             self.world.draw_sprite(self.world.screen, self.world.player.x, self.world.player.y, "player")
             self.world.draw_sprite(self.world.screen, enemy.x, enemy.y, enemy.name)
             
-            # Draw health bars with proper width and height
-            hp_bar_width = 300
-            hp_bar_height = 25
-            padding = 10
+            # Draw health bars
+            Bar.draw_health_bar(self.screen, self.world.player, 10, 10)
+            Bar.draw_health_bar(self.screen, enemy, WINDOW_SIZE - 210, 10)
             
-            # Draw player health bar
-            self.draw_health_bar(self.world.screen, self.world.player.health, self.world.player.max_health,
-                               padding, padding, hp_bar_width, hp_bar_height)
-            
-            # Draw enemy health bar
-            self.draw_health_bar(self.world.screen, enemy.health, enemy.max_health,
-                               padding, padding + hp_bar_height + 5, hp_bar_width, hp_bar_height)
+            # Draw XP bar for player
+            Bar.draw_xp_bar(self.screen, self.world.player, 10, 35)
             
             # Draw combat messages
             self.draw_combat_messages(combat_messages)
@@ -576,39 +576,6 @@ class Game:
             self.clock.tick(60)
         
         return False
-
-    def draw_health_bar(self, character, x, y):
-        """Draw a health bar for a character"""
-        bar_width = 200
-        bar_height = 20
-        fill = (character.health / character.max_health) * bar_width
-        
-        # Draw the background
-        pygame.draw.rect(self.screen, (255, 0, 0), (x, y, bar_width, bar_height))
-        # Draw the fill
-        pygame.draw.rect(self.screen, (0, 255, 0), (x, y, fill, bar_height))
-        # Draw the border
-        pygame.draw.rect(self.screen, (255, 255, 255), (x, y, bar_width, bar_height), 2)
-        
-        # Draw the text
-        health_text = f"{character.name}: {character.health}/{character.max_health} HP"
-        self.draw_text(health_text, x, y - 20)
-        
-        # Draw XP bar for player character
-        if character == self.world.player:
-            xp_y = y + bar_height + 5
-            xp_fill = (character.exp / (character.level * 100)) * bar_width
-            
-            # Draw the background
-            pygame.draw.rect(self.screen, (100, 100, 100), (x, xp_y, bar_width, bar_height))
-            # Draw the fill
-            pygame.draw.rect(self.screen, (0, 0, 255), (x, xp_y, xp_fill, bar_height))
-            # Draw the border
-            pygame.draw.rect(self.screen, (255, 255, 255), (x, xp_y, bar_width, bar_height), 2)
-            
-            # Draw the text
-            xp_text = f"Level {character.level} - XP: {character.exp}/{character.level * 100}"
-            self.draw_text(xp_text, x, xp_y + bar_height + 5)
 
     def draw_combat_messages(self, messages):
         """Draw combat messages"""
