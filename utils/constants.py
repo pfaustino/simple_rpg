@@ -73,4 +73,6 @@ LOOT_TABLES = {
         (0.4, {"type": "weapon", "name": "Dragon Fang", "attack": 8}),
         (0.4, {"type": "armor", "name": "Dragon Scale Mail", "defense": 6})
     ]
-} 
+}
+
+MAX_CONSOLE_MESSAGES = 100  # Maximum number of messages to store in console history 

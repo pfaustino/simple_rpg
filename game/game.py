@@ -6,7 +6,7 @@ from utils.constants import (
     WINDOW_SIZE, WHITE, BLACK, GREEN, SOUND_ENEMY_DEFEAT,
     SOUND_PLAYER_DEFEAT, SOUND_FLEE, WINDOW_TITLE
 )
-from utils.helpers import play_sound, save_game, load_game, load_sprite_mappings
+from utils.helpers import play_sound, save_game, load_game, load_sprite_mappings, play_wave_sound
 from entities.character import Character
 from game.combat import CombatSystem
 from entities.items import Item, Inventory
@@ -20,8 +20,13 @@ class Game:
         """Initialize the game"""
         # Initialize Pygame and set up display first
         pygame.init()
+        pygame.mixer.init()  # Initialize the sound mixer
         self.screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE))
         pygame.display.set_caption("Simple RPG")
+        
+        # Initialize window dimensions
+        self.width = WINDOW_SIZE
+        self.height = WINDOW_SIZE
         
         # Initialize font
         self.font = pygame.font.Font(None, 24)
@@ -30,7 +35,7 @@ class Game:
         self.clock = pygame.time.Clock()
         
         # Initialize message console
-        self.message_console = MessageConsole(max_messages=6)
+        self.message_console = MessageConsole()
         
         print("Game initialized")
         
@@ -122,6 +127,9 @@ class Game:
         self.combat_system = CombatSystem(self)
         
         self.bar_renderer = Bar()
+        
+        # Load sounds
+        self.encounter_sound = pygame.mixer.Sound("sounds/CivilWarDrummer.wav")
 
     def create_enemy(self):
         """Create a random enemy with appropriate stats"""
@@ -166,6 +174,67 @@ class Game:
                     else:
                         self.message_console.add_message(f"Cannot equip {item.name}")
 
+    def animate_movement(self, start_x, start_y, end_x, end_y):
+        """Animate movement from start position to end position"""
+        ANIMATION_SPEED = 4  # pixels per frame
+        
+        # Convert tile positions to pixel positions
+        start_pixel_x = start_x * self.world.CELL_SIZE
+        start_pixel_y = start_y * self.world.CELL_SIZE
+        end_pixel_x = end_x * self.world.CELL_SIZE
+        end_pixel_y = end_y * self.world.CELL_SIZE
+        
+        # Current pixel position
+        current_pixel_x = start_pixel_x
+        current_pixel_y = start_pixel_y
+        
+        # Calculate direction and distance
+        dx = end_pixel_x - start_pixel_x
+        dy = end_pixel_y - start_pixel_y
+        distance = max(abs(dx), abs(dy))
+        
+        if distance == 0:
+            return
+            
+        # Normalize movement vector
+        move_x = (dx / distance) * ANIMATION_SPEED
+        move_y = (dy / distance) * ANIMATION_SPEED
+        
+        # Animation loop
+        clock = pygame.time.Clock()
+        while abs(current_pixel_x - end_pixel_x) > ANIMATION_SPEED or abs(current_pixel_y - end_pixel_y) > ANIMATION_SPEED:
+            # Update position
+            if abs(current_pixel_x - end_pixel_x) > ANIMATION_SPEED:
+                current_pixel_x += move_x
+            else:
+                current_pixel_x = end_pixel_x
+                
+            if abs(current_pixel_y - end_pixel_y) > ANIMATION_SPEED:
+                current_pixel_y += move_y
+            else:
+                current_pixel_y = end_pixel_y
+            
+            # Update world display
+            self.world.display_viewport()
+            
+            # Calculate screen position relative to viewport
+            screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE + (current_pixel_x - end_pixel_x)
+            screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE + (current_pixel_y - end_pixel_y)
+            
+            # Draw player at current position
+            self.player.draw(self.world.screen, int(screen_x), int(screen_y))
+            
+            # Update display
+            pygame.display.flip()
+            clock.tick(60)  # Cap at 60 FPS
+        
+        # Ensure final position is exact
+        self.world.display_viewport()
+        screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+        screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+        self.player.draw(self.world.screen, screen_x, screen_y)
+        pygame.display.flip()
+
     def handle_movement(self, event):
         """Handle player movement and game state updates"""
         # Calculate player screen position (needed for all drawing operations)
@@ -173,13 +242,18 @@ class Game:
         player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
         
         # Handle sprite debug view first
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-            self.show_sprite_debug = not self.show_sprite_debug
-            if self.show_sprite_debug:
-                self.world.sprite_debug_window.open()
-            else:
-                self.world.sprite_debug_window.close()
-            return "continue"
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE:
+                self.show_sprite_debug = not self.show_sprite_debug
+                if self.show_sprite_debug:
+                    self.world.sprite_debug_window.open()
+                else:
+                    self.world.sprite_debug_window.close()
+            elif event.key == pygame.K_i:  # Open inventory
+                self.show_inventory = True
+                return
+            elif event.key == pygame.K_ESCAPE:
+                return "quit"
         
         # Don't handle movement if in combat
         if self.in_combat:
@@ -195,24 +269,35 @@ class Game:
         # Handle regular game controls when not in sprite debug
         if event.type == pygame.KEYDOWN:
             moved = False
-            if event.key == pygame.K_LEFT:
-                moved = self.world.move_player(self.world.player_x - 1, self.world.player_y)
-            elif event.key == pygame.K_RIGHT:
-                moved = self.world.move_player(self.world.player_x + 1, self.world.player_y)
-            elif event.key == pygame.K_UP:
-                moved = self.world.move_player(self.world.player_x, self.world.player_y - 1)
-            elif event.key == pygame.K_DOWN:
-                moved = self.world.move_player(self.world.player_x, self.world.player_y + 1)
-            elif event.key == pygame.K_ESCAPE:
-                return "quit"
+            new_x, new_y = self.world.player_x, self.world.player_y
             
-            # Only create enemy if we successfully moved and aren't in combat
-            if moved and not self.in_combat:
-                # 30% chance to encounter an enemy when moving
-                if random.random() < 0.3:
-                    enemy = self.create_enemy()
-                    self.battle(enemy)
-        
+            if event.key == pygame.K_LEFT:
+                new_x -= 1
+            elif event.key == pygame.K_RIGHT:
+                new_x += 1
+            elif event.key == pygame.K_UP:
+                new_y -= 1
+            elif event.key == pygame.K_DOWN:
+                new_y += 1
+            
+            # Check if movement is valid and animate if it is
+            if (new_x, new_y) != (self.world.player_x, self.world.player_y):
+                if self.world.is_valid_move(new_x, new_y):
+                    # Store old position for animation
+                    old_x, old_y = self.world.player_x, self.world.player_y
+                    
+                    # Update position in world
+                    moved = self.world.move_player(new_x, new_y)
+                    
+                    if moved:
+                        # Animate the movement
+                        self.animate_movement(old_x, old_y, new_x, new_y)
+                        
+                        # Check for enemy encounter after movement
+                        if random.random() < 0.3:
+                            enemy = self.create_enemy()
+                            self.battle(enemy)
+            
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.show_sprite_debug:
             # Get click position relative to viewport
             click_x, click_y = event.pos
@@ -228,21 +313,21 @@ class Game:
             if path and not self.in_combat:
                 # Move along the path
                 for next_x, next_y in path:
-                    if self.world.move_player(next_x, next_y):
-                        # 30% chance to encounter an enemy when moving
-                        if random.random() < 0.3:
-                            enemy = self.create_enemy()
-                            self.battle(enemy)
-                            if not self.player.is_alive():
-                                self.show_game_over()
-                                self.game_running = False
-                                return "quit"
-                            break
-                    # Update display after each step
-                    self.world.display_viewport()
-                    self.player.draw(self.world.screen, player_screen_x, player_screen_y)
-                    pygame.display.flip()
-                    pygame.time.delay(100)
+                    if self.world.is_valid_move(next_x, next_y):
+                        old_x, old_y = self.world.player_x, self.world.player_y
+                        if self.world.move_player(next_x, next_y):
+                            # Animate the movement
+                            self.animate_movement(old_x, old_y, next_x, next_y)
+                            
+                            # Check for enemy encounter
+                            if random.random() < 0.3:
+                                enemy = self.create_enemy()
+                                self.battle(enemy)
+                                if not self.player.is_alive():
+                                    self.show_game_over()
+                                    self.game_running = False
+                                    return "quit"
+                                break
         
         return "continue"
 
@@ -288,65 +373,71 @@ class Game:
 
     def run(self):
         """Main game loop"""
-        self.game_running = True
+        running = True
         clock = pygame.time.Clock()
         
-        while self.game_running:
+        while running:
             # Handle events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    self.game_running = False
-                    break
+                    running = False
                 elif event.type == pygame.VIDEORESIZE:
-                    self.world.handle_resize((event.w, event.h))
+                    self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+                    self.width, self.height = event.w, event.h
+                    self.message_console.scroll_to_bottom()  # Reset scroll position on resize
+                
+                # Handle console scrolling
+                console_rect = pygame.Rect(
+                    0,
+                    self.height - 150,  # Console height
+                    self.width,
+                    150
+                )
+                if self.message_console.handle_scroll(event, console_rect):
+                    continue  # Skip other event processing if console handled the event
+                
+                # Handle other events based on game state
+                if self.show_inventory:
+                    self.handle_inventory_input(event)
+                elif self.show_sprite_debug:
+                    self.handle_sprite_debug_input(event)
                 else:
                     result = self.handle_movement(event)
                     if result == "quit":
-                        self.game_running = False
+                        running = False
                         break
             
-            # Clear the screen at the start of each frame
-            self.screen.fill((0, 0, 0))
+            # Clear the screen
+            self.screen.fill(WHITE)
             
-            # Draw game state in proper order
+            # Draw the game world in the middle area (between status bar and console)
+            status_height = 40  # Height of the status bar
+            console_height = 150  # Height of the console
+            viewport_height = self.height - status_height - console_height
+            self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y, status_height)
+            
+            # Draw the player
+            player_screen_x = self.width // 2
+            player_screen_y = status_height + (viewport_height // 2)
+            self.player.draw(self.screen, player_screen_x, player_screen_y)
+            
+            # Draw UI overlays based on game state
             if self.show_inventory:
                 self.draw_inventory_screen()
             elif self.show_sprite_debug:
-                self.world.sprite_debug_window.draw(self.world.screen)
-            else:
-                # 1. Draw the game world
-                self.world.display_viewport()
-                
-                # 2. Calculate player screen position
-                player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
-                player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
-                
-                # 3. Draw player at center of viewport
-                self.player.draw(self.world.screen, player_screen_x, player_screen_y)
-                
-                # 4. Draw combat screen if in combat
-                if self.in_combat:
-                    self.draw_combat_screen()
-                
-                # 5. Always draw UI elements last
-                # Draw player status bars
-                Bar.draw_health_bar(self.screen, self.player, 10, 10)
-                Bar.draw_xp_bar(self.screen, self.player, 10, 35)
-                
-                # Draw message console at the bottom
-                console_height = 100
-                self.message_console.draw(self.screen, 10, WINDOW_SIZE - console_height - 10, 
-                                        WINDOW_SIZE - 20, console_height)
+                self.draw_sprite_debug()
             
-            # Update display once per frame
+            # Always draw persistent UI elements last
+            self.draw_player_status()  # Draw status bar at the top
+            self.message_console.draw(self.screen, 0, self.height - 150, self.width, 150)  # Draw console at the bottom
+            
+            # Update the display
             pygame.display.flip()
             
             # Cap the frame rate
             clock.tick(60)
         
         # Clean up
-        if self.world.sprite_debug_window.is_open:
-            self.world.sprite_debug_window.close()
         pygame.quit()
 
     def show_game_over(self):
@@ -689,9 +780,12 @@ class Game:
         return True 
 
     def battle(self, enemy):
-        """Handle battle with an enemy"""
+        """Start a battle with an enemy"""
         self.current_enemy = enemy
         self.in_combat = True
+        
+        # Play first 1.5 seconds of encounter sound
+        play_wave_sound(self.encounter_sound, starttime=0, maxtime=1500)
         
         if self.combat_system.handle_battle(enemy):
             self.combat_system.enemy_turn(enemy)
