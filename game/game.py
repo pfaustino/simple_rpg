@@ -126,14 +126,23 @@ class Game:
     def create_enemy(self):
         """Create a random enemy with appropriate stats"""
         enemy_name = random.choice(self.enemies)
+        enemy = None
         if enemy_name == "Dragon":
-            return Character(enemy_name, health=150, attack=20, character_type='enemy')
+            enemy = Character(enemy_name, health=150, attack=20, character_type='enemy')
         elif enemy_name == "Troll":
-            return Character(enemy_name, health=100, attack=15, character_type='enemy')
+            enemy = Character(enemy_name, health=100, attack=15, character_type='enemy')
         elif enemy_name == "Orc":
-            return Character(enemy_name, health=80, attack=12, character_type='enemy')
+            enemy = Character(enemy_name, health=80, attack=12, character_type='enemy')
         else:  # Goblin
-            return Character(enemy_name, health=50, attack=8, character_type='enemy')
+            enemy = Character(enemy_name, health=50, attack=8, character_type='enemy')
+        
+        # Position the enemy one tile away from the player
+        # Randomly choose a direction (up, down, left, right)
+        direction = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0)])
+        enemy.x = self.world.player_x + direction[0]
+        enemy.y = self.world.player_y + direction[1]
+        
+        return enemy
 
     def handle_inventory_input(self, event):
         """Handle input while inventory is open"""
@@ -196,15 +205,15 @@ class Game:
                 moved = self.world.move_player(self.world.player_x, self.world.player_y + 1)
             elif event.key == pygame.K_ESCAPE:
                 return "quit"
-                
+            
             # Only create enemy if we successfully moved and aren't in combat
             if moved and not self.in_combat:
                 # 30% chance to encounter an enemy when moving
                 if random.random() < 0.3:
                     enemy = self.create_enemy()
                     self.battle(enemy)
-                    
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.show_sprite_debug:  # Left click
+        
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.show_sprite_debug:
             # Get click position relative to viewport
             click_x, click_y = event.pos
             viewport_x = click_x // self.world.CELL_SIZE
@@ -228,12 +237,12 @@ class Game:
                                 self.show_game_over()
                                 self.game_running = False
                                 return "quit"
-                            break  # Stop moving if we encounter an enemy
+                            break
                     # Update display after each step
                     self.world.display_viewport()
                     self.player.draw(self.world.screen, player_screen_x, player_screen_y)
                     pygame.display.flip()
-                    pygame.time.delay(100)  # Small delay between steps
+                    pygame.time.delay(100)
         
         return "continue"
 
@@ -296,25 +305,40 @@ class Game:
                         self.game_running = False
                         break
             
-            # Update game state
+            # Clear the screen at the start of each frame
+            self.screen.fill((0, 0, 0))
+            
+            # Draw game state in proper order
             if self.show_inventory:
                 self.draw_inventory_screen()
+            elif self.show_sprite_debug:
+                self.world.sprite_debug_window.draw(self.world.screen)
             else:
-                if self.show_sprite_debug:
-                    # Only draw sprite debug view when in debug mode
-                    self.world.sprite_debug_window.draw(self.world.screen)
-                else:
-                    # Only draw game world when not in debug mode
-                    self.world.display_viewport()
-                    
-                    # Calculate player screen position
-                    player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
-                    player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
-                    
-                    # Draw player at center of viewport
-                    self.player.draw(self.world.screen, player_screen_x, player_screen_y)
+                # 1. Draw the game world
+                self.world.display_viewport()
+                
+                # 2. Calculate player screen position
+                player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+                player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+                
+                # 3. Draw player at center of viewport
+                self.player.draw(self.world.screen, player_screen_x, player_screen_y)
+                
+                # 4. Draw combat screen if in combat
+                if self.in_combat:
+                    self.draw_combat_screen()
+                
+                # 5. Always draw UI elements last
+                # Draw player status bars
+                Bar.draw_health_bar(self.screen, self.player, 10, 10)
+                Bar.draw_xp_bar(self.screen, self.player, 10, 35)
+                
+                # Draw message console at the bottom
+                console_height = 100
+                self.message_console.draw(self.screen, 10, WINDOW_SIZE - console_height - 10, 
+                                        WINDOW_SIZE - 20, console_height)
             
-            # Update display
+            # Update display once per frame
             pygame.display.flip()
             
             # Cap the frame rate
@@ -442,44 +466,92 @@ class Game:
         text_surface = self.font.render(text, True, color)
         self.screen.blit(text_surface, (x, y))
 
+    def draw_player_status(self):
+        """Draw the player's status bar at the top of the screen"""
+        # Draw health bar
+        health_width = 200
+        health_height = 20
+        health_x = 10
+        health_y = 10
+        
+        # Draw health bar background
+        pygame.draw.rect(self.world.screen, (100, 0, 0), 
+                        (health_x, health_y, health_width, health_height))
+        
+        # Draw health bar fill
+        health_percent = self.player.health / self.player.max_health
+        pygame.draw.rect(self.world.screen, (0, 255, 0),
+                        (health_x, health_y, health_width * health_percent, health_height))
+        
+        # Draw health text
+        health_text = f"HP: {self.player.health}/{self.player.max_health}"
+        text_surface = self.font.render(health_text, True, WHITE)
+        self.world.screen.blit(text_surface, (health_x + 5, health_y + 2))
+        
+        # Draw XP bar
+        xp_width = 200
+        xp_height = 15
+        xp_x = 10
+        xp_y = 35
+        
+        # Draw XP bar background
+        pygame.draw.rect(self.world.screen, (50, 50, 50),
+                        (xp_x, xp_y, xp_width, xp_height))
+        
+        # Draw XP bar fill
+        xp_percent = self.player.exp / self.player.exp_to_next_level
+        pygame.draw.rect(self.world.screen, (0, 0, 255),
+                        (xp_x, xp_y, xp_width * xp_percent, xp_height))
+        
+        # Draw XP text
+        xp_text = f"XP: {self.player.exp}/{self.player.exp_to_next_level} (Level {self.player.level})"
+        text_surface = self.font.render(xp_text, True, WHITE)
+        self.world.screen.blit(text_surface, (xp_x + 5, xp_y + 2))
+        
+        # Draw gold amount
+        gold_text = f"Gold: {self.player.inventory.gold}"
+        text_surface = self.font.render(gold_text, True, WHITE)
+        self.world.screen.blit(text_surface, (xp_x + xp_width + 20, xp_y + 2))
+
     def draw_combat_screen(self):
-        """Draw the combat screen"""
-        # Draw the game world in the background
+        """Draw the combat screen with all UI elements"""
+        # Draw the base game world first
         self.world.display_viewport()
         
-        # Create a semi-transparent overlay
-        overlay = pygame.Surface((WINDOW_SIZE, WINDOW_SIZE))
-        overlay.fill((0, 0, 0))
-        overlay.set_alpha(128)  # 50% opacity
-        self.screen.blit(overlay, (0, 0))
-        
-        # Calculate player screen position
+        # Draw the player character
         player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
         player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
+        self.player.draw(self.world.screen, player_screen_x, player_screen_y)
         
-        # Draw player and enemy
-        self.player.draw(self.screen, player_screen_x - 100, player_screen_y)  # Player on left
+        # Draw the enemy if it exists
         if self.current_enemy:
-            self.current_enemy.draw(self.screen, player_screen_x + 100, player_screen_y)  # Enemy on right
-            
-        # Draw health bars
-        Bar.draw_health_bar(self.screen, self.player, 10, 10)  # Player health bar on left
+            # Position enemy on the right side of the player
+            enemy_screen_x = player_screen_x + 100  # 100 pixels to the right of player
+            enemy_screen_y = player_screen_y
+            self.current_enemy.draw(self.world.screen, enemy_screen_x, enemy_screen_y)
+        
+        # Draw combat UI elements
+        # Draw player status bar at the top
+        Bar.draw_health_bar(self.world.screen, self.player, 10, 10)
+        Bar.draw_xp_bar(self.world.screen, self.player, 10, 35)
+        
+        # Draw enemy health bar if enemy exists
         if self.current_enemy:
-            Bar.draw_health_bar(self.screen, self.current_enemy, WINDOW_SIZE - 210, 10)  # Enemy health bar on right
-            
-        # Draw XP bar for player
-        Bar.draw_xp_bar(self.screen, self.player, 10, 35)
-            
+            Bar.draw_health_bar(self.world.screen, self.current_enemy, 10, 60)
+        
         # Draw combat options
-        option_text = "Combat Options:"
-        self.draw_text(option_text, 10, 400, WHITE)
-        self.draw_text("1: Attack  2: Strong Attack  3: Heal  4: Flee", 10, 430, WHITE)
+        options = ["Attack", "Defend", "Use Item", "Flee"]
+        for i, option in enumerate(options):
+            text = self.font.render(option, True, WHITE)
+            self.world.screen.blit(text, (10, 200 + i * 30))
         
-        # Draw message console at the bottom of the screen
-        console_height = 100
-        self.message_console.draw(self.screen, 10, WINDOW_SIZE - console_height - 10, WINDOW_SIZE - 20, console_height)
+        # Draw message console at the bottom
+        # Calculate console dimensions (20% of screen height, full width)
+        console_height = int(self.world.window_height * 0.2)  # 20% of screen height
+        console_y = self.world.window_height - console_height
+        self.message_console.draw(self.world.screen, 0, console_y, self.world.window_width, console_height)
         
-        # Update display
+        # Update the display
         pygame.display.flip()
 
     def handle_combat(self, enemy):
