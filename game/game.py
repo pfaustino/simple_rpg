@@ -4,8 +4,13 @@ import random
 import sys
 import json
 from utils.constants import (
-    WINDOW_SIZE, WHITE, BLACK, GREEN, SOUND_ENEMY_DEFEAT,
-    SOUND_PLAYER_DEFEAT, SOUND_FLEE, WINDOW_TITLE
+    SCREEN_WIDTH, SCREEN_HEIGHT, TILE_SIZE,
+    STATE_MENU, STATE_PLAYING, STATE_COMBAT,
+    STATE_INVENTORY, STATE_SAVE, STATE_LOAD,
+    STATE_QUIT, SOUND_BUTTON_CLICK, SOUND_LEVEL_UP,
+    SOUND_ITEM_PICKUP, SOUND_COMBAT_START, SOUND_COMBAT_END,
+    SOUND_ATTACK, SOUND_HIT, SOUND_MISS, SOUND_DEATH,
+    SOUND_VICTORY, WHITE, BLACK, GREEN, WINDOW_TITLE, YELLOW
 )
 from utils.helpers import play_sound, save_game, load_game, load_sprite_mappings, play_wave_sound
 from entities.character import Character
@@ -23,12 +28,12 @@ class Game:
         # Initialize Pygame and set up display first
         pygame.init()
         pygame.mixer.init()  # Initialize the sound mixer
-        self.screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE))
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Simple RPG")
         
         # Initialize window dimensions
-        self.width = WINDOW_SIZE
-        self.height = WINDOW_SIZE
+        self.width = SCREEN_WIDTH
+        self.height = SCREEN_HEIGHT
         
         # Initialize font
         self.font = pygame.font.Font(None, 24)
@@ -50,6 +55,7 @@ class Game:
         self.current_enemy = None
         self.sprite_debug_active = False
         self.show_inventory = False
+        self.unequip_mode = False  # Initialize unequip_mode
                
         # Debug view flags
         self.show_debug = False
@@ -60,6 +66,13 @@ class Game:
         
         # Load sprite mappings if they exist
         load_sprite_mappings()
+        
+        # Load item databases
+        self.load_item_databases()
+        
+        # Initialize spell system
+        from game.spells import SpellSystem
+        self.spell_system = SpellSystem(self)
         
         # Try to load saved game
         save_data = load_game()
@@ -78,6 +91,8 @@ class Game:
             self.player.exp_to_next_level = save_data["player"].get("exp_to_next_level", 100)
             self.player.max_health = save_data["player"]["max_health"]
             self.player.attack = save_data["player"]["attack"]
+            self.player.mp = save_data["player"].get("mp", 50)  # Restore MP
+            self.player.max_mp = save_data["player"].get("max_mp", 50)  # Restore max MP
             # Restore kill stats
             self.player.kills = save_data["player"].get("kills", {})
             # Restore inventory if it exists
@@ -90,19 +105,11 @@ class Game:
                         self.player.equipment[slot] = Item.from_dict(item_data)
         else:
             # Create new player character
-            self.player = Character(
-                name="Hero",
-                health=100,
-                attack=10,
-                character_type='player'
-            )
-            # Initialize XP system (these should be set in Character.__init__ but let's make sure)
-            self.player.level = 1
-            self.player.exp = 0
-            self.player.exp_to_next_level = 100
+            self.player = self.create_player()
         
         # Initialize world with player
         self.world = World(self.player)
+        self.world.game = self  # Set the game reference
         self.world.show_debug = self.show_debug
         self.world.show_sprite_debug = self.show_sprite_debug
         self.world.screen = self.screen  # Share the screen surface
@@ -134,9 +141,6 @@ class Game:
         
         self.bar_renderer = Bar()
         
-        # Load sounds
-        self.encounter_sound = pygame.mixer.Sound("sounds/CivilWarDrummer.wav")
-
     def load_monster_database(self):
         """Load the monster database from JSON file"""
         try:
@@ -195,21 +199,86 @@ class Game:
             if event.key == pygame.K_i:  # Close inventory
                 self.show_inventory = False
             elif event.key == pygame.K_u:  # Unequip menu
-                self.message_console.add_message("Press 1 for weapon, 2 for armor")
-            elif event.key in [pygame.K_1, pygame.K_2]:  # Changed condition to remove message.startswith check
-                slot = "weapon" if event.key == pygame.K_1 else "armor"
-                if self.player.unequip_item(slot):
-                    self.message_console.add_message(f"Unequipped {slot}")
+                self.message_console.add_message("Press 1 for weapon, 2 for armor, 3 for accessory to unequip")
+                self.unequip_mode = True
+            elif self.unequip_mode and event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:  # Unequip items
+                if event.key == pygame.K_1:
+                    slot = "weapon"
+                elif event.key == pygame.K_2:
+                    slot = "armor"
                 else:
-                    self.message_console.add_message(f"No {slot} to unequip")
-            elif pygame.K_1 <= event.key <= pygame.K_9:
-                item_index = event.key - pygame.K_1
-                if item_index < len(self.player.inventory.items):
-                    item = self.player.inventory.items[item_index]
-                    if self.player.equip_item(item_index):
-                        self.message_console.add_message(f"Equipped {item.name}")
-                    else:
-                        self.message_console.add_message(f"Cannot equip {item.name}")
+                    slot = "accessory"
+                
+                # Check if there's an item equipped in the slot
+                if self.player.equipment[slot]:
+                    # Try to unequip the item
+                    unequipped_item = self.player.unequip_item(slot)
+                    if unequipped_item:
+                        if self.player.inventory.add_item(unequipped_item):
+                            self.message_console.add_message(f"Unequipped {unequipped_item.name}")
+                            play_sound(SOUND_ITEM_PICKUP)
+                        else:
+                            # If inventory is full, re-equip the item
+                            self.player.equipment[slot] = unequipped_item
+                            self.message_console.add_message("Inventory full! Cannot unequip.")
+                else:
+                    self.message_console.add_message(f"No {slot} equipped")
+                self.unequip_mode = False  # Exit unequip mode after attempt
+            
+            elif pygame.K_1 <= event.key <= pygame.K_9:  # Equip/use items (when not in unequip mode)
+                if not hasattr(self, 'unequip_mode') or not self.unequip_mode:
+                    item_index = event.key - pygame.K_1
+                    if item_index < len(self.player.inventory.items):
+                        item = self.player.inventory.items[item_index]
+                        
+                        # Determine item type and handle accordingly
+                        if item.item_type == "weapon":
+                            # Try to equip the weapon
+                            old_item = self.player.equip_item(item)
+                            if old_item is not None:
+                                # Successfully equipped, remove from inventory
+                                self.player.inventory.remove_item(item)
+                                # Add the old item to inventory if there was one
+                                if old_item:
+                                    self.player.inventory.add_item(old_item)
+                                self.message_console.add_message(f"Equipped {item.name}")
+                                play_sound(SOUND_ITEM_PICKUP)
+                            else:
+                                self.message_console.add_message(f"Cannot equip {item.name}")
+                        elif item.item_type == "armor":
+                            # Try to equip the armor
+                            old_item = self.player.equip_item(item)
+                            if old_item is not None:
+                                # Successfully equipped, remove from inventory
+                                self.player.inventory.remove_item(item)
+                                # Add the old item to inventory if there was one
+                                if old_item:
+                                    self.player.inventory.add_item(old_item)
+                                self.message_console.add_message(f"Equipped {item.name}")
+                                play_sound(SOUND_ITEM_PICKUP)
+                            else:
+                                self.message_console.add_message(f"Cannot equip {item.name}")
+                        elif item.item_type == "accessory":
+                            # Try to equip the accessory
+                            old_item = self.player.equip_item(item)
+                            if old_item is not None:
+                                # Successfully equipped, remove from inventory
+                                self.player.inventory.remove_item(item)
+                                # Add the old item to inventory if there was one
+                                if old_item:
+                                    self.player.inventory.add_item(old_item)
+                                self.message_console.add_message(f"Equipped {item.name}")
+                                play_sound(SOUND_ITEM_PICKUP)
+                            else:
+                                self.message_console.add_message(f"Cannot equip {item.name}")
+                        else:
+                            # For non-equipment items (potions, food, etc.)
+                            if self.player.use_item(item):
+                                self.player.inventory.remove_item(item)
+                                self.message_console.add_message(f"Used {item.name}")
+                                play_sound(SOUND_ITEM_PICKUP)
+                            else:
+                                self.message_console.add_message(f"Cannot use {item.name} right now")
 
     def animate_movement(self, start_x, start_y, end_x, end_y):
         """Animate movement from start position to end position"""
@@ -278,6 +347,13 @@ class Game:
         player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
         player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
         
+        # Regenerate 10 MP per movement action (if not in combat)
+        if not self.in_combat and event.type == pygame.KEYDOWN:
+            if event.key in [pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN]:
+                self.player.mp = min(self.player.max_mp, self.player.mp + 10)
+                if self.player.mp < self.player.max_mp:
+                    self.message_console.add_message("You recover 10 MP!")
+        
         # Handle sprite debug view first
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_SPACE:
@@ -332,9 +408,14 @@ class Game:
                         self.animate_movement(old_x, old_y, new_x, new_y)
                         
                         # Check for enemy encounter after movement
-                        if random.random() < 0.3:
+                        if random.random() < 0.3 and not self.in_combat:
                             enemy = self.create_enemy()
+                            self.in_combat = True  # Set combat state before starting battle
                             self.battle(enemy)
+                            if not self.player.is_alive():
+                                self.show_game_over()
+                                return "quit"
+                            self.in_combat = False  # Reset combat state after battle
             
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.show_sprite_debug:
             # Get click position relative to viewport
@@ -357,52 +438,76 @@ class Game:
                             # Animate the movement
                             self.animate_movement(old_x, old_y, next_x, next_y)
                             
+                            # Regenerate 10 MP per movement step
+                            self.player.mp = min(self.player.max_mp, self.player.mp + 10)
+                            if self.player.mp < self.player.max_mp:
+                                self.message_console.add_message("You recover 10 MP!")
+                            
                             # Check for enemy encounter
-                            if random.random() < 0.3:
+                            if random.random() < 0.3 and not self.in_combat:
                                 enemy = self.create_enemy()
+                                self.in_combat = True  # Set combat state before starting battle
                                 self.battle(enemy)
                                 if not self.player.is_alive():
                                     self.show_game_over()
-                                    self.game_running = False
                                     return "quit"
+                                self.in_combat = False  # Reset combat state after battle
                                 break
         
         return "continue"
 
     def handle_enemy_defeat(self, enemy):
-        """Handle enemy defeat, including loot and experience"""
+        """Handle enemy defeat, including loot generation and experience rewards"""
         # Record the kill
-        self.player.record_kill(enemy.name)
+        self.world.kill_count += 1
         
-        # Generate and display loot
-        loot = self.generate_loot(enemy.monster_data)
-        loot_message = []
-        for item in loot:
-            if item.item_type == "gold":
-                self.player.inventory.gold += item.value
-                loot_message.append(f"{item.value} gold")
-            else:
-                if self.player.inventory.add_item(item):
-                    loot_message.append(item.name)
-                else:
-                    self.message_console.add_message("Inventory full! Some items were lost!")
+        # Generate loot based on monster data if available
+        loot = []
+        if enemy.monster_data:
+            loot = self.generate_loot(enemy.monster_data)
         
-        # Get XP reward from monster data
-        xp_reward = enemy.monster_data['exp_reward']
+        # Calculate total gold from gold items
+        gold_items = [item for item in loot if item.name == "Gold"]
+        total_gold = sum(item.value for item in gold_items)
+        
+        # Add gold to inventory
+        self.player.inventory.gold += total_gold
+        
+        # Add non-gold items to inventory
+        non_gold_items = [item for item in loot if item.name != "Gold"]
+        for item in non_gold_items:
+            self.player.inventory.add_item(item)
+        
+        # Add experience if monster data is available
+        exp_gained = enemy.monster_data.get("exp_reward", 0) if enemy.monster_data else 0
+        self.player.gain_exp(exp_gained)
+        
+        # Regenerate some MP after combat
+        self.player.mp = min(self.player.max_mp, self.player.mp + 10)
         
         # Display victory message with loot
-        if loot_message:
-            self.message_console.add_message(f"Defeated! Found: {', '.join(loot_message)}! +{xp_reward} XP!")
-        else:
-            self.message_console.add_message(f"Defeated! No loot found. +{xp_reward} XP!")
+        loot_message = f"Defeated {enemy.name}!"
+        if total_gold > 0:
+            loot_message += f"\nFound {total_gold} gold!"
+        if non_gold_items:
+            loot_message += "\nLoot:"
+            for item in non_gold_items:
+                if item.quantity > 1:
+                    loot_message += f"\n- {item.name} (x{item.quantity})"
+                else:
+                    loot_message += f"\n- {item.name}"
         
-        play_sound(SOUND_ENEMY_DEFEAT)
-        self.player.gain_exp(xp_reward)
+        self.message_console.add_message(loot_message)
+        if exp_gained > 0:
+            self.message_console.add_message(f"Gained {exp_gained} XP!")
         
         # Autosave after successful fight
-        if save_game(self.player, self.world):
-            time.sleep(1)  # Wait a bit so player can read loot message
-            self.message_console.add_message("Game autosaved!")
+        save_game(self.player, self.world)
+        self.message_console.add_message("Game autosaved!")
+        
+        # Force console to update and display the autosave message
+        self.message_console.draw(self.screen, 0, SCREEN_HEIGHT - 150, SCREEN_WIDTH, 150)
+        pygame.display.flip()
 
     def run(self):
         """Main game loop"""
@@ -432,15 +537,7 @@ class Game:
                             self.system_menu.hide()
                         elif menu_action == "New Game":
                             # Reset player and world
-                            self.player = Character(
-                                name="Hero",
-                                health=100,
-                                attack=10,
-                                character_type='player'
-                            )
-                            self.player.level = 1
-                            self.player.exp = 0
-                            self.player.exp_to_next_level = 100
+                            self.player = self.create_player()
                             self.world = World(self.player)
                             self.system_menu.hide()
                         elif menu_action == "Tools":
@@ -513,30 +610,28 @@ class Game:
     def show_game_over(self):
         """Show the game over screen"""
         self.world.screen.fill(BLACK)
-        self.world.draw_text("Game Over!", (WINDOW_SIZE//2 - 50, WINDOW_SIZE//2 - 50), WHITE)
+        self.world.draw_text("Game Over!", (SCREEN_WIDTH//2 - 50, SCREEN_HEIGHT//2 - 50), WHITE)
         self.world.draw_text(f"Final level: {self.player.level}", 
-                           (WINDOW_SIZE//2 - 50, WINDOW_SIZE//2), WHITE)
+                           (SCREEN_WIDTH//2 - 50, SCREEN_HEIGHT//2), WHITE)
         self.world.draw_text(f"Final location: ({self.world.player_x}, {self.world.player_y})", 
-                           (WINDOW_SIZE//2 - 100, WINDOW_SIZE//2 + 50), WHITE)
+                           (SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT//2 + 50), WHITE)
         pygame.display.flip()
         time.sleep(3)
 
     def draw_inventory_screen(self):
         """Draw the inventory screen overlay"""
         # Create a semi-transparent overlay
-        overlay = pygame.Surface((WINDOW_SIZE, WINDOW_SIZE))
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         overlay.fill((0, 0, 0))
         overlay.set_alpha(180)  # 70% opacity
         self.world.screen.blit(overlay, (0, 0))
         
-        # Draw inventory title
+        # Draw inventory title and gold amount on the same line
         self.world.draw_text("Inventory", (20, 20), WHITE)
-        
-        # Draw gold amount
-        self.world.draw_text(f"Gold: {self.player.inventory.gold}", (20, 50), WHITE)
+        self.world.draw_text(f"Gold: {self.player.inventory.gold}", (200, 20), WHITE)
         
         # Draw equipped items
-        y_pos = 80
+        y_pos = 60  # Moved down to prevent overlap
         self.world.draw_text("Equipped:", (20, y_pos), WHITE)
         y_pos += 30
         for slot, item in self.player.equipment.items():
@@ -552,75 +647,131 @@ class Game:
         self.world.draw_text("Items:", (20, y_pos), WHITE)
         y_pos += 30
         
-        for i, item in enumerate(self.player.inventory.items):
-            if y_pos < WINDOW_SIZE - 80:  # Leave space for controls
-                self.world.draw_text(f"[{i+1}] {item.name}", (40, y_pos), WHITE)
+        # Filter out gold items from the display
+        displayed_items = [item for item in self.player.inventory.items if item.item_type != "gold"]
+        
+        for i, item in enumerate(displayed_items):
+            if y_pos < SCREEN_HEIGHT - 80:  # Leave space for controls
+                # Display item name with quantity if stackable
+                if item.stackable and item.quantity > 1:
+                    self.world.draw_text(f"[{i+1}] {item.name} x{item.quantity}", (40, y_pos), WHITE)
+                else:
+                    self.world.draw_text(f"[{i+1}] {item.name}", (40, y_pos), WHITE)
                 y_pos += 30
         
         # Draw controls at the bottom
         self.world.draw_text("Controls: [1-9] Equip/Use Item | [U] Unequip | [I] Close", 
-                           (20, WINDOW_SIZE - 30), WHITE)
+                           (20, SCREEN_HEIGHT - 30), WHITE)
 
-    def generate_loot(self, enemy_name):
-        """Generate loot based on enemy type"""
+    def generate_loot(self, monster_data):
+        """Generate loot based on monster data"""
         loot = []
         
-        # Base gold values for each enemy type
-        gold_values = {
-            "Dragon": (80, 120),
-            "Troll": (40, 80),
-            "Orc": (20, 40),
-            "Goblin": (5, 15)
-        }
-        
-        # Add gold
-        min_gold, max_gold = gold_values.get(enemy_name, (10, 30))
+        # Add gold based on monster level
+        min_gold = monster_data.get("min_gold", 0)
+        max_gold = monster_data.get("max_gold", 0)
         gold_amount = random.randint(min_gold, max_gold)
-        loot.append(Item("Gold Coins", "gold", gold_amount))
+        if gold_amount > 0:
+            gold_item = Item("Gold", "gold", gold_amount, value=gold_amount)
+            loot.append(gold_item)
         
-        # Chance to drop equipment
-        drop_chance = {
-            "Dragon": 0.8,
-            "Troll": 0.5,
-            "Orc": 0.3,
-            "Goblin": 0.1
-        }.get(enemy_name, 0.2)
+        # Add equipment based on monster level and rarity
+        monster_level = monster_data.get("level", 1)
+        rarity_roll = random.random()
         
-        if random.random() < drop_chance:
-            # Possible equipment drops
-            weapons = [
-                ("Rusty Dagger", 1),
-                ("Iron Sword", 2),
-                ("Steel Blade", 3),
-                ("Magic Sword", 4),
-                ("Dragon Slayer", 5)
-            ]
-            armor = [
-                ("Leather Armor", 1),
-                ("Chain Mail", 2),
-                ("Steel Plate", 3),
-                ("Magic Armor", 4),
-                ("Dragon Scale", 5)
-            ]
-            
-            # Better enemies drop better loot
-            quality = {
-                "Dragon": (3, 5),
-                "Troll": (2, 4),
-                "Orc": (1, 3),
-                "Goblin": (0, 2)
-            }.get(enemy_name, (0, 2))
-            
-            # Maybe drop a weapon
-            if random.random() < 0.5:
-                name, bonus = random.choice(weapons[quality[0]:quality[1]])
-                loot.append(Item(name, "weapon", bonus))
-            # Maybe drop armor
-            if random.random() < 0.5:
-                name, bonus = random.choice(armor[quality[0]:quality[1]])
-                loot.append(Item(name, "armor", bonus))
+        # Determine rarity based on roll
+        if rarity_roll < 0.05:  # 5% chance for rare
+            rarity = "rare"
+            item_level = monster_level + random.randint(1, 2)
+        elif rarity_roll < 0.15:  # 10% chance for uncommon
+            rarity = "uncommon"
+            item_level = monster_level
+        else:  # 85% chance for common
+            rarity = "common"
+            item_level = max(1, monster_level - 1)
+        
+        # Generate equipment based on monster type
+        monster_type = monster_data.get("type", "unknown")
+        if monster_type == "humanoid":
+            # Humanoid monsters can drop weapons and armor
+            if random.random() < 0.3:  # 30% chance for weapon
+                weapon = self.generate_weapon(item_level, rarity)
+                if weapon:
+                    loot.append(weapon)
+            if random.random() < 0.3:  # 30% chance for armor
+                armor = self.generate_armor(item_level, rarity)
+                if armor:
+                    loot.append(armor)
+        else:
+            # Non-humanoid monsters have a lower chance of dropping equipment
+            if random.random() < 0.15:  # 15% chance for weapon
+                weapon = self.generate_weapon(item_level, rarity)
+                if weapon:
+                    loot.append(weapon)
+            if random.random() < 0.15:  # 15% chance for armor
+                armor = self.generate_armor(item_level, rarity)
+                if armor:
+                    loot.append(armor)
         
         return loot
+
+    def generate_weapon(self, item_level, rarity):
+        """Generate a weapon based on level and rarity"""
+        try:
+            # Filter weapons by level requirement
+            available_weapons = [
+                weapon for weapon in self.weapon_database.values()
+                if weapon.get('level_req', 1) <= item_level
+            ]
+            
+            if not available_weapons:
+                return None
+                
+            # Select a random weapon from available ones
+            weapon_data = random.choice(available_weapons)
+            
+            # Create weapon item with stats
+            weapon = Item(
+                name=weapon_data.get('name', 'Unknown Weapon'),
+                item_type="weapon",
+                value=weapon_data.get('value', 0),
+                stats={"attack": weapon_data.get('attack', 1)},
+                rarity=rarity
+            )
+            
+            return weapon
+        except Exception as e:
+            print(f"Error generating weapon: {e}")
+            return None
+
+    def generate_armor(self, item_level, rarity):
+        """Generate a random armor piece"""
+        try:
+            # Filter available armor based on level requirement
+            available_armor = [
+                armor for armor in self.armor_database.values()
+                if armor.get('level_requirement', 1) <= item_level
+            ]
+            
+            if not available_armor:
+                return None
+                
+            # Select random armor from filtered list
+            armor_data = random.choice(available_armor)
+            
+            # Create armor item
+            armor = Item(
+                name=armor_data.get('name', 'Unknown Armor'),
+                item_type='armor',
+                value=armor_data.get('value', 0),
+                stats={'defense': armor_data.get('defense', 1)},
+                rarity=rarity
+            )
+            
+            return armor
+        except Exception as e:
+            print(f"Error generating armor: {e}")
+            return None
 
     def draw_text(self, text, x, y, color=WHITE):
         """Draw text on the screen"""
@@ -628,51 +779,20 @@ class Game:
         self.screen.blit(text_surface, (x, y))
 
     def draw_player_status(self):
-        """Draw the player's status bar at the top of the screen"""
+        """Draw player status information"""
         # Draw health bar
-        health_width = 200
-        health_height = 20
-        health_x = 10
-        health_y = 10
+        self.bar_renderer.draw_health_bar(self.screen, self.player, 10, 10)
         
-        # Draw health bar background
-        pygame.draw.rect(self.world.screen, (100, 0, 0), 
-                        (health_x, health_y, health_width, health_height))
+        # Draw MP bar
+        self.bar_renderer.draw_mp_bar(self.screen, self.player, 10, 35)
         
-        # Draw health bar fill
-        health_percent = self.player.health / self.player.max_health
-        pygame.draw.rect(self.world.screen, (0, 255, 0),
-                        (health_x, health_y, health_width * health_percent, health_height))
+        # Draw XP bar with level label inside
+        self.bar_renderer.draw_xp_bar(self.screen, self.player, 10, 60)
         
-        # Draw health text
-        health_text = f"HP: {self.player.health}/{self.player.max_health}"
-        text_surface = self.font.render(health_text, True, WHITE)
-        self.world.screen.blit(text_surface, (health_x + 5, health_y + 2))
-        
-        # Draw XP bar
-        xp_width = 200
-        xp_height = 15
-        xp_x = 10
-        xp_y = 35
-        
-        # Draw XP bar background
-        pygame.draw.rect(self.world.screen, (50, 50, 50),
-                        (xp_x, xp_y, xp_width, xp_height))
-        
-        # Draw XP bar fill
-        xp_percent = self.player.exp / self.player.exp_to_next_level
-        pygame.draw.rect(self.world.screen, (0, 0, 255),
-                        (xp_x, xp_y, xp_width * xp_percent, xp_height))
-        
-        # Draw XP text
-        xp_text = f"XP: {self.player.exp}/{self.player.exp_to_next_level} (Level {self.player.level})"
-        text_surface = self.font.render(xp_text, True, WHITE)
-        self.world.screen.blit(text_surface, (xp_x + 5, xp_y + 2))
-        
-        # Draw gold amount
+        # Draw gold counter
         gold_text = f"Gold: {self.player.inventory.gold}"
-        text_surface = self.font.render(gold_text, True, WHITE)
-        self.world.screen.blit(text_surface, (xp_x + xp_width + 20, xp_y + 2))
+        text = self.font.render(gold_text, True, YELLOW)
+        self.screen.blit(text, (10, 85))
 
     def draw_combat_screen(self):
         """Draw the combat screen with all UI elements"""
@@ -693,12 +813,12 @@ class Game:
         
         # Draw combat UI elements
         # Draw player status bar at the top
-        Bar.draw_health_bar(self.world.screen, self.player, 10, 10)
-        Bar.draw_xp_bar(self.world.screen, self.player, 10, 35)
+        self.bar_renderer.draw_health_bar(self.world.screen, self.player, 10, 10)
+        self.bar_renderer.draw_xp_bar(self.world.screen, self.player, 10, 35)
         
         # Draw enemy health bar if enemy exists
         if self.current_enemy:
-            Bar.draw_health_bar(self.world.screen, self.current_enemy, 10, 60)
+            self.bar_renderer.draw_health_bar(self.world.screen, self.current_enemy, 10, 60)
         
         # Draw combat options
         options = ["Attack", "Defend", "Use Item", "Flee"]
@@ -782,11 +902,11 @@ class Game:
             self.world.draw_sprite(self.world.screen, enemy.x, enemy.y, enemy.name)
             
             # Draw health bars
-            Bar.draw_health_bar(self.screen, self.world.player, 10, 10)
-            Bar.draw_health_bar(self.screen, enemy, WINDOW_SIZE - 210, 10)
+            self.bar_renderer.draw_health_bar(self.screen, self.world.player, 10, 10)
+            self.bar_renderer.draw_health_bar(self.screen, enemy, SCREEN_HEIGHT - 210, 10)
             
             # Draw XP bar for player
-            Bar.draw_xp_bar(self.screen, self.world.player, 10, 35)
+            self.bar_renderer.draw_xp_bar(self.screen, self.world.player, 10, 35)
             
             # Draw combat messages
             self.draw_combat_messages(combat_messages)
@@ -818,46 +938,284 @@ class Game:
             self.world.screen.blit(text_surface, (50, 350 + i * 30))
 
     def handle_events(self):
-        """Handle all game events"""
+        """Handle game events"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    return False
-                elif event.key == pygame.K_d:
-                    # Toggle terrain debug view
-                    self.show_debug = not self.show_debug
-                    self.show_sprite_debug = False
-                    self.world.show_debug = self.show_debug
-                elif event.key == pygame.K_s:
-                    # Toggle sprite debug view
-                    self.show_sprite_debug = not self.show_sprite_debug
-                    self.show_debug = False
-                    self.world.show_debug = False
-                elif event.key == pygame.K_g:
-                    # Return to game view
-                    self.show_debug = False
-                    self.show_sprite_debug = False
-                    self.world.show_debug = False
-                else:
-                    self.handle_movement(event)
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                # Handle mouse clicks in sprite debug view
-                if event.button == 1 and self.show_sprite_debug:  # Left click
-                    if self.world.handle_sprite_debug_click(event.pos):
+                return "quit"
+            
+            # Handle system menu
+            if self.system_menu.is_visible:
+                menu_action = self.system_menu.handle_event(event)
+                if menu_action:
+                    if menu_action == "Save Game":
+                        save_game(self.player, self.world)
+                    elif menu_action == "Load Game":
+                        save_data = load_game()
+                        if save_data:
+                            self.load_game_state(save_data)
+                    elif menu_action == "Quit Game":
+                        return "quit"
                         continue
-        return True 
+            
+            # Handle console scrolling
+            console_rect = pygame.Rect(
+                0,
+                self.height - 150,  # Console height
+                self.width,
+                150
+            )
+            if self.message_console.handle_scroll(event, console_rect):
+                continue  # Skip other event processing if console handled the event
+            
+            # Handle other events based on game state
+            if self.in_combat:
+                result = self.combat_system.handle_combat_turn(event)
+                if result == "game_over":
+                    self.show_game_over()
+                    return "quit"
+            elif self.show_inventory:
+                self.handle_inventory_input(event)
+            elif self.show_sprite_debug:
+                self.handle_sprite_debug_input(event)
+            else:
+                result = self.handle_movement(event)
+                if result == "quit":
+                    self.system_menu.show()
+        
+        return "continue"
 
     def battle(self, enemy):
         """Start a battle with an enemy"""
-        self.current_enemy = enemy
-        self.in_combat = True
+        if enemy is None:
+            return
+            
+        # Initialize combat system
+        self.combat_system = CombatSystem(self)
+        self.combat_system.start_combat(enemy)
         
-        # Play first 1.5 seconds of encounter sound
-        play_wave_sound(self.encounter_sound, starttime=0, maxtime=1500)
+        # Main combat loop
+        while self.combat_system.in_combat:
+            self.handle_events()
+            self.update()
+            self.draw()
+            pygame.display.flip()
+            self.clock.tick(60)
         
-        if self.combat_system.handle_battle(enemy):
-            self.combat_system.enemy_turn(enemy)
-            return True
-        return False 
+        # End combat
+        self.combat_system.end_combat() 
+
+    def update(self):
+        """Update game state"""
+        if self.in_combat:
+            # Update combat system
+            self.combat_system.update()
+        else:
+            # Update world state
+            self.world.update()
+            
+        # Update message console
+        self.message_console.update()
+        
+        # Update any active animations
+        if hasattr(self, 'combat_system'):
+            self.combat_system.update_animations() 
+
+    def draw(self):
+        """Draw the current game state"""
+        # Clear the screen
+        self.screen.fill(BLACK)
+        
+        if self.in_combat:
+            # Draw combat screen
+            self.combat_system.draw_combat_screen()
+        else:
+            # Draw world
+            self.world.draw(self.screen)
+            
+            # Draw player status
+            self.draw_player_status()
+            
+            # Draw message console
+            self.message_console.draw(self.screen, 10, SCREEN_HEIGHT - 160, 400, 150)
+            
+        # Update the display
+        pygame.display.flip() 
+
+    def load_item_databases(self):
+        """Load all item databases from JSON files"""
+        try:
+            # Load weapon database
+            with open('data/weapons.json', 'r') as f:
+                weapons_data = json.load(f)
+                self.weapon_database = {weapon['name']: weapon for weapon in weapons_data['weapons']}
+        except Exception as e:
+            print(f"Error loading weapon database: {e}")
+            self.weapon_database = {}
+            
+        try:
+            # Load armor database
+            with open('data/armor.json', 'r') as f:
+                armor_data = json.load(f)
+                self.armor_database = {armor['name']: armor for armor in armor_data['armor']}
+        except Exception as e:
+            print(f"Error loading armor database: {e}")
+            self.armor_database = {}
+            
+        try:
+            # Load resource database
+            with open('data/resources.json', 'r') as f:
+                self.resource_database = json.load(f)
+        except Exception as e:
+            print(f"Error loading resource database: {e}")
+            self.resource_database = {}
+            
+        try:
+            # Load food database
+            with open('data/food.json', 'r') as f:
+                self.food_database = json.load(f)
+        except Exception as e:
+            print(f"Error loading food database: {e}")
+            self.food_database = {}
+            
+        try:
+            # Load potion database
+            with open('data/potions.json', 'r') as f:
+                self.potion_database = json.load(f)
+        except Exception as e:
+            print(f"Error loading potion database: {e}")
+            self.potion_database = {} 
+
+    def create_player(self):
+        """Create a new player character"""
+        # Create player with initial stats
+        player = Character(
+            name="Player",
+            level=1,
+            health=100,
+            max_health=100,
+            attack=15,
+            defense=10,
+            speed=10,
+            mp=50,  # Add initial MP
+            max_mp=50  # Add max MP
+        )
+        
+        # Add starting items
+        player.inventory.add_item("Health Potion", 3)
+        player.inventory.add_item("Mana Potion", 2)
+        
+        # Add starting spells
+        player.known_spells = ['fireball', 'lesser_heal']  # Start with basic spells
+        
+        return player
+
+    def handle_combat_turn(self, event):
+        """Handle a single turn of combat"""
+        if not self.in_combat:
+            return "continue"
+
+        # Update status effects
+        for character in self.turn_order:
+            character.update_status_effects()
+
+        # Check if combat is over
+        if not self.game.player.is_alive():
+            return "game_over"
+        if not self.current_enemy.is_alive():
+            self.handle_enemy_defeat()
+            return "continue"
+
+        # Handle input for player's turn
+        if self.turn_order[0] == self.game.player:
+            if event.type == pygame.KEYDOWN:
+                # Number key shortcuts for combat actions
+                if event.key == pygame.K_1:
+                    self.combat_system.selected_option = 0  # Attack
+                    return self.combat_system.handle_player_action()
+                elif event.key == pygame.K_2:
+                    self.combat_system.selected_option = 1  # Strong Attack
+                    return self.combat_system.handle_player_action()
+                elif event.key == pygame.K_3:
+                    self.combat_system.selected_option = 2  # Heal
+                    return self.combat_system.handle_player_action()
+                elif event.key == pygame.K_4:
+                    self.combat_system.selected_option = 3  # Flee
+                    return self.combat_system.handle_player_action()
+                
+                # Arrow key navigation
+                if event.key == pygame.K_UP:
+                    self.combat_system.selected_option = (self.combat_system.selected_option - 1) % len(self.combat_system.combat_options)
+                elif event.key == pygame.K_DOWN:
+                    self.combat_system.selected_option = (self.combat_system.selected_option + 1) % len(self.combat_system.combat_options)
+                elif event.key == pygame.K_RETURN:
+                    return self.combat_system.handle_player_action()
+        else:
+            # Enemy's turn
+            return self.combat_system.handle_enemy_turn()
+
+        return "continue" 
+
+    def load_game_state(self, save_data):
+        """Load game state from save data"""
+        # Create player with saved stats
+        self.player = Character(
+            save_data["player"]["name"],
+            health=save_data["player"]["max_health"],
+            attack=save_data["player"]["attack"],
+            character_type='player'
+        )
+        # Restore player stats
+        self.player.health = save_data["player"]["health"]
+        self.player.level = save_data["player"]["level"]
+        self.player.exp = save_data["player"]["exp"]
+        self.player.exp_to_next_level = save_data["player"].get("exp_to_next_level", 100)
+        self.player.max_health = save_data["player"]["max_health"]
+        self.player.attack = save_data["player"]["attack"]
+        self.player.mp = save_data["player"].get("mp", 50)  # Restore MP
+        self.player.max_mp = save_data["player"].get("max_mp", 50)  # Restore max MP
+        # Restore kill stats
+        self.player.kills = save_data["player"].get("kills", {})
+        # Restore inventory if it exists
+        if "inventory" in save_data["player"]:
+            self.player.inventory = Inventory.from_dict(save_data["player"]["inventory"])
+        # Restore equipment if it exists
+        if "equipment" in save_data["player"]:
+            for slot, item_data in save_data["player"]["equipment"].items():
+                if item_data:
+                    self.player.equipment[slot] = Item.from_dict(item_data)
+        else:
+            # Create new player character
+            self.player = self.create_player()
+        
+        # Initialize world with player
+        self.world = World(self.player)
+        self.world.show_debug = self.show_debug
+        self.world.show_sprite_debug = self.show_sprite_debug
+        self.world.screen = self.screen  # Share the screen surface
+        
+        # Restore player position if save exists
+        if save_data and "world" in save_data:
+            self.world.player_x = save_data["world"].get("player_x", 0)
+            self.world.player_y = save_data["world"].get("player_y", 0)
+        
+        # Combat options
+        self.combat_options = [
+            "Attack",
+            "Strong Attack",
+            "Heal",
+            "Flee"
+        ]
+        self.selected_option = 0
+        
+        # Enemy types
+        self.enemies = ["Goblin", "Orc", "Troll", "Dragon"]
+        
+        print("Game initialization complete")
+        
+        # Load monster database
+        self.monster_database = self.load_monster_database()
+        
+        # Initialize combat system
+        self.combat_system = CombatSystem(self)
+        
+        self.bar_renderer = Bar() 
