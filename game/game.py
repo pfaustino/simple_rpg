@@ -11,6 +11,7 @@ from entities.character import Character
 from game.combat import CombatSystem
 from entities.items import Item, Inventory
 from ui.console import MessageConsole
+from ui.systemmenu import SystemMenu
 from game.world import World
 from game.sprites import sprite_manager
 from ui.bar import Bar
@@ -36,6 +37,9 @@ class Game:
         
         # Initialize message console
         self.message_console = MessageConsole()
+        
+        # Initialize system menu
+        self.system_menu = SystemMenu(self.width, self.height)
         
         print("Game initialized")
         
@@ -253,7 +257,8 @@ class Game:
                 self.show_inventory = True
                 return
             elif event.key == pygame.K_ESCAPE:
-                return "quit"
+                self.system_menu.show()
+                return "menu"
         
         # Don't handle movement if in combat
         if self.in_combat:
@@ -376,6 +381,9 @@ class Game:
         running = True
         clock = pygame.time.Clock()
         
+        # Show system menu at start
+        self.system_menu.show()
+        
         while running:
             # Handle events
             for event in pygame.event.get():
@@ -385,6 +393,36 @@ class Game:
                     self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
                     self.width, self.height = event.w, event.h
                     self.message_console.scroll_to_bottom()  # Reset scroll position on resize
+                
+                # Handle system menu first if it's visible
+                if self.system_menu.is_visible:
+                    menu_action = self.system_menu.handle_event(event)
+                    if menu_action:
+                        if menu_action == "Continue":
+                            self.system_menu.hide()
+                        elif menu_action == "New Game":
+                            # Reset player and world
+                            self.player = Character(
+                                name="Hero",
+                                health=100,
+                                attack=10,
+                                character_type='player'
+                            )
+                            self.player.level = 1
+                            self.player.exp = 0
+                            self.player.exp_to_next_level = 100
+                            self.world = World(self.player)
+                            self.system_menu.hide()
+                        elif menu_action == "Tools":
+                            self.show_sprite_debug = not self.show_sprite_debug
+                            if self.show_sprite_debug:
+                                self.world.sprite_debug_window.open()
+                            else:
+                                self.world.sprite_debug_window.close()
+                            self.system_menu.hide()
+                        elif menu_action == "Quit Game":
+                            running = False
+                    continue
                 
                 # Handle console scrolling
                 console_rect = pygame.Rect(
@@ -404,8 +442,7 @@ class Game:
                 else:
                     result = self.handle_movement(event)
                     if result == "quit":
-                        running = False
-                        break
+                        self.system_menu.show()
             
             # Clear the screen
             self.screen.fill(WHITE)
@@ -430,6 +467,9 @@ class Game:
             # Always draw persistent UI elements last
             self.draw_player_status()  # Draw status bar at the top
             self.message_console.draw(self.screen, 0, self.height - 150, self.width, 150)  # Draw console at the bottom
+            
+            # Draw system menu if visible
+            self.system_menu.draw(self.screen)
             
             # Update the display
             pygame.display.flip()
