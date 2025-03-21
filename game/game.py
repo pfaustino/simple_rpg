@@ -2,6 +2,7 @@ import pygame
 import time
 import random
 import sys
+import json
 from utils.constants import (
     WINDOW_SIZE, WHITE, BLACK, GREEN, SOUND_ENEMY_DEFEAT,
     SOUND_PLAYER_DEFEAT, SOUND_FLEE, WINDOW_TITLE
@@ -123,9 +124,10 @@ class Game:
         # Enemy types
         self.enemies = ["Goblin", "Orc", "Troll", "Dragon"]
         
-        # Display initial viewport
-        self.world.display_viewport()
         print("Game initialization complete")
+        
+        # Load monster database
+        self.monster_database = self.load_monster_database()
         
         # Initialize combat system
         self.combat_system = CombatSystem(self)
@@ -135,21 +137,52 @@ class Game:
         # Load sounds
         self.encounter_sound = pygame.mixer.Sound("sounds/CivilWarDrummer.wav")
 
+    def load_monster_database(self):
+        """Load the monster database from JSON file"""
+        try:
+            with open('data/monsters.json', 'r') as f:
+                data = json.load(f)
+                return data['monsters']
+        except Exception as e:
+            print(f"Error loading monster database: {e}")
+            return []
+
     def create_enemy(self):
-        """Create a random enemy with appropriate stats"""
-        enemy_name = random.choice(self.enemies)
-        enemy = None
-        if enemy_name == "Dragon":
-            enemy = Character(enemy_name, health=150, attack=20, character_type='enemy')
-        elif enemy_name == "Troll":
-            enemy = Character(enemy_name, health=100, attack=15, character_type='enemy')
-        elif enemy_name == "Orc":
-            enemy = Character(enemy_name, health=80, attack=12, character_type='enemy')
-        else:  # Goblin
-            enemy = Character(enemy_name, health=50, attack=8, character_type='enemy')
+        """Create a random enemy from the monster database"""
+        # Get player's current level (default to 1 if not set)
+        player_level = getattr(self.player, 'level', 1)
+        
+        # Filter monsters that are appropriate for the player's level
+        appropriate_monsters = [
+            monster for monster in self.monster_database
+            if monster['level_range'][0] <= player_level <= monster['level_range'][1]
+        ]
+        
+        if not appropriate_monsters:
+            # If no appropriate monsters found, use the closest level range
+            appropriate_monsters = sorted(
+                self.monster_database,
+                key=lambda m: abs(m['level_range'][0] - player_level)
+            )[:5]  # Take top 5 closest level ranges
+        
+        # Select a random monster from the appropriate ones
+        monster_data = random.choice(appropriate_monsters)
+        
+        # Create the enemy character with the monster's stats
+        enemy = Character(
+            monster_data['name'],
+            health=monster_data['base_stats']['hp'],
+            attack=monster_data['base_stats']['attack'],
+            defense=monster_data['base_stats']['defense'],
+            speed=monster_data['base_stats']['speed'],
+            mp=monster_data['base_stats']['mp'],
+            character_type='enemy'
+        )
+        
+        # Store the monster data for loot generation
+        enemy.monster_data = monster_data
         
         # Position the enemy one tile away from the player
-        # Randomly choose a direction (up, down, left, right)
         direction = random.choice([(0, 1), (0, -1), (1, 0), (-1, 0)])
         enemy.x = self.world.player_x + direction[0]
         enemy.y = self.world.player_y + direction[1]
@@ -219,7 +252,7 @@ class Game:
                 current_pixel_y = end_pixel_y
             
             # Update world display
-            self.world.display_viewport()
+            self.world.display_viewport(self.world.screen, end_x, end_y)
             
             # Calculate screen position relative to viewport
             screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE + (current_pixel_x - end_pixel_x)
@@ -233,7 +266,7 @@ class Game:
             clock.tick(60)  # Cap at 60 FPS
         
         # Ensure final position is exact
-        self.world.display_viewport()
+        self.world.display_viewport(self.world.screen, end_x, end_y)
         screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
         screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
         self.player.draw(self.world.screen, screen_x, screen_y)
@@ -342,7 +375,7 @@ class Game:
         self.player.record_kill(enemy.name)
         
         # Generate and display loot
-        loot = self.generate_loot(enemy.name)
+        loot = self.generate_loot(enemy.monster_data)
         loot_message = []
         for item in loot:
             if item.item_type == "gold":
@@ -354,13 +387,8 @@ class Game:
                 else:
                     self.message_console.add_message("Inventory full! Some items were lost!")
         
-        # Determine XP reward based on enemy type
-        xp_reward = {
-            "Dragon": 100,
-            "Troll": 75,
-            "Orc": 50,
-            "Goblin": 25
-        }.get(enemy.name, 50)  # Default to 50 if enemy type not found
+        # Get XP reward from monster data
+        xp_reward = enemy.monster_data['exp_reward']
         
         # Display victory message with loot
         if loot_message:
@@ -393,6 +421,8 @@ class Game:
                     self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
                     self.width, self.height = event.w, event.h
                     self.message_console.scroll_to_bottom()  # Reset scroll position on resize
+                    self.system_menu.resize(event.w, event.h)  # Update menu positions
+                    self.world.resize(event.w, event.h)  # Update world viewport size
                 
                 # Handle system menu first if it's visible
                 if self.system_menu.is_visible:
@@ -647,7 +677,7 @@ class Game:
     def draw_combat_screen(self):
         """Draw the combat screen with all UI elements"""
         # Draw the base game world first
-        self.world.display_viewport()
+        self.world.display_viewport(self.world.screen, self.world.player_x, self.world.player_y)
         
         # Draw the player character
         player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
