@@ -237,6 +237,9 @@ class World:
         # Generate initial world
         self.generate_world()
         
+        # Display the initial viewport after world generation
+        self.display_viewport()
+        
         print("World initialized")
 
     def handle_resize(self, size):
@@ -370,8 +373,9 @@ class World:
 
     def display_viewport(self):
         """Display the current viewport of the world"""
-        # Clear screen with white background
-        self.screen.fill(WHITE)
+        # Create a surface for the viewport
+        viewport_surface = pygame.Surface((self.window_width, self.window_height))
+        viewport_surface.fill(WHITE)
         
         # Calculate viewport boundaries
         viewport_start_x = self.player_x - self.VIEWPORT_SIZE // 2
@@ -379,117 +383,44 @@ class World:
         viewport_end_x = viewport_start_x + self.VIEWPORT_SIZE
         viewport_end_y = viewport_start_y + self.VIEWPORT_SIZE
         
-        world_size = 50  # Half of our 100x100 world
-        grass_sprite = None  # Cache grass sprite for edge filling
-        
-        # Calculate actual viewport size in pixels
-        viewport_width_pixels = self.window_width
-        viewport_height_pixels = self.window_height
-        
-        # First draw terrain
-        for y in range(viewport_start_y, viewport_end_y + 1):  # +1 to handle partial tiles
-            for x in range(viewport_start_x, viewport_end_x + 1):  # +1 to handle partial tiles
+        # Draw terrain onto viewport surface
+        for y in range(viewport_start_y, viewport_end_y + 1):
+            for x in range(viewport_start_x, viewport_end_x + 1):
+                # Calculate screen position
                 screen_x = (x - viewport_start_x) * self.CELL_SIZE
                 screen_y = (y - viewport_start_y) * self.CELL_SIZE
                 
-                # Check if position is outside world bounds
-                if abs(x) > world_size or abs(y) > world_size:
-                    # Get or create grass sprite for edges
-                    if grass_sprite is None:
-                        grass_sprite = sprite_manager.get_base_tile("grass")
-                    if grass_sprite and grass_sprite.image:
-                        # Scale grass sprite if needed
-                        current_size = grass_sprite.image.get_size()
-                        if current_size != (self.CELL_SIZE, self.CELL_SIZE):
-                            scaled_image = pygame.transform.scale(grass_sprite.image, 
-                                                               (self.CELL_SIZE, self.CELL_SIZE))
-                            # Calculate the portion of the tile that should be visible
-                            visible_width = min(self.CELL_SIZE, viewport_width_pixels - screen_x)
-                            visible_height = min(self.CELL_SIZE, viewport_height_pixels - screen_y)
-                            if visible_width > 0 and visible_height > 0:
-                                # Only draw the visible portion of the tile
-                                visible_rect = pygame.Rect(0, 0, visible_width, visible_height)
-                                self.screen.blit(scaled_image, (screen_x, screen_y), visible_rect)
-                        else:
-                            visible_width = min(self.CELL_SIZE, viewport_width_pixels - screen_x)
-                            visible_height = min(self.CELL_SIZE, viewport_height_pixels - screen_y)
-                            if visible_width > 0 and visible_height > 0:
-                                visible_rect = pygame.Rect(0, 0, visible_width, visible_height)
-                                self.screen.blit(grass_sprite.image, (screen_x, screen_y), visible_rect)
-                    continue
+                # Get terrain type for this cell
+                terrain = self.get_terrain(x, y)
                 
-                # Get terrain at this position
-                terrain_sprite = self.world_map.get((x, y))
-                if terrain_sprite is None:
-                    # If no terrain exists at this position, create grass
-                    if grass_sprite is None:
-                        grass_sprite = sprite_manager.get_base_tile("grass")
-                    if grass_sprite:
-                        # Create a new sprite instance using the copy method
-                        terrain_sprite = grass_sprite.copy()
-                        terrain_sprite.rect.x = x * self.CELL_SIZE
-                        terrain_sprite.rect.y = y * self.CELL_SIZE
-                        self.world_map[(x, y)] = terrain_sprite
+                # Draw the base terrain
+                sprite = None
+                if terrain == 'water':
+                    sprite = sprite_manager.get_base_tile('water')
+                elif terrain == 'grass':
+                    sprite = sprite_manager.get_base_tile('grass')
+                elif terrain == 'sand':
+                    sprite = sprite_manager.get_base_tile('sand')
+                else:  # Default to dirt
+                    sprite = sprite_manager.get_base_tile('dirt')
                 
-                if terrain_sprite and terrain_sprite.image:
-                    # Scale sprite to match cell size if needed
-                    current_size = terrain_sprite.image.get_size()
-                    if current_size != (self.CELL_SIZE, self.CELL_SIZE):
-                        scaled_image = pygame.transform.scale(terrain_sprite.image, 
-                                                           (self.CELL_SIZE, self.CELL_SIZE))
-                        # Calculate the portion of the tile that should be visible
-                        visible_width = min(self.CELL_SIZE, viewport_width_pixels - screen_x)
-                        visible_height = min(self.CELL_SIZE, viewport_height_pixels - screen_y)
-                        if visible_width > 0 and visible_height > 0:
-                            visible_rect = pygame.Rect(0, 0, visible_width, visible_height)
-                            self.screen.blit(scaled_image, (screen_x, screen_y), visible_rect)
-                    else:
-                        visible_width = min(self.CELL_SIZE, viewport_width_pixels - screen_x)
-                        visible_height = min(self.CELL_SIZE, viewport_height_pixels - screen_y)
-                        if visible_width > 0 and visible_height > 0:
-                            visible_rect = pygame.Rect(0, 0, visible_width, visible_height)
-                            self.screen.blit(terrain_sprite.image, (screen_x, screen_y), visible_rect)
+                if sprite:
+                    viewport_surface.blit(sprite.image, (screen_x, screen_y))
+                
+                # Draw overlay features
+                overlay = self.get_overlay(x, y)
+                if overlay:
+                    # Extract category and type from overlay name
+                    parts = overlay.split('_')
+                    if len(parts) >= 2:
+                        category = parts[0]
+                        overlay_type = parts[1]
+                        overlay_sprite = sprite_manager.get_overlay_sprite(category, overlay_type)
+                        if overlay_sprite:
+                            viewport_surface.blit(overlay_sprite.image, (screen_x, screen_y))
         
-        # Then draw overlays
-        if hasattr(self, 'overlay_map'):
-            for y in range(viewport_start_y, viewport_end_y + 1):  # +1 to handle partial tiles
-                for x in range(viewport_start_x, viewport_end_x + 1):  # +1 to handle partial tiles
-                    # Skip if outside world bounds
-                    if abs(x) > world_size or abs(y) > world_size:
-                        continue
-                        
-                    screen_x = (x - viewport_start_x) * self.CELL_SIZE
-                    screen_y = (y - viewport_start_y) * self.CELL_SIZE
-                    
-                    # Get overlay at this position
-                    overlay_sprite = self.overlay_map.get((x, y))
-                    if overlay_sprite and overlay_sprite.image:
-                        # Scale overlay to match cell size if needed
-                        current_size = overlay_sprite.image.get_size()
-                        if current_size != (self.CELL_SIZE, self.CELL_SIZE):
-                            scaled_image = pygame.transform.scale(overlay_sprite.image, 
-                                                               (self.CELL_SIZE, self.CELL_SIZE))
-                            # Calculate the portion of the tile that should be visible
-                            visible_width = min(self.CELL_SIZE, viewport_width_pixels - screen_x)
-                            visible_height = min(self.CELL_SIZE, viewport_height_pixels - screen_y)
-                            if visible_width > 0 and visible_height > 0:
-                                visible_rect = pygame.Rect(0, 0, visible_width, visible_height)
-                                self.screen.blit(scaled_image, (screen_x, screen_y), visible_rect)
-                        else:
-                            visible_width = min(self.CELL_SIZE, viewport_width_pixels - screen_x)
-                            visible_height = min(self.CELL_SIZE, viewport_height_pixels - screen_y)
-                            if visible_width > 0 and visible_height > 0:
-                                visible_rect = pygame.Rect(0, 0, visible_width, visible_height)
-                                self.screen.blit(overlay_sprite.image, (screen_x, screen_y), visible_rect)
-        
-        # Draw player at center
-        player_screen_x = (self.VIEWPORT_SIZE // 2) * self.CELL_SIZE
-        player_screen_y = (self.VIEWPORT_SIZE // 2) * self.CELL_SIZE
-        pygame.draw.rect(self.screen, self.player.color, 
-                        (player_screen_x, player_screen_y, self.CELL_SIZE, self.CELL_SIZE))
-        
-        # Update the display
-        pygame.display.flip()
+        # Finally, blit the viewport surface onto the screen
+        self.screen.blit(viewport_surface, (0, 0))
 
     def get_path_to(self, target_x, target_y):
         """Get a path to the target position"""
@@ -551,3 +482,26 @@ class World:
         # Calculate maximum scroll
         self.max_scroll = max(0, total_height - visible_height)
         print(f"Max scroll calculated: {self.max_scroll}")  # Debug print 
+
+    def get_terrain(self, x, y):
+        """Get the terrain type at the given coordinates"""
+        if (x, y) in self.world_map:
+            sprite = self.world_map[(x, y)]
+            # Extract terrain type from sprite name
+            sprite_name = sprite.name if hasattr(sprite, 'name') else ''
+            if 'water' in sprite_name.lower():
+                return 'water'
+            elif 'grass' in sprite_name.lower():
+                return 'grass'
+            elif 'sand' in sprite_name.lower():
+                return 'sand'
+            elif 'dirt' in sprite_name.lower():
+                return 'dirt'
+        return 'grass'  # Default to grass for unknown terrain
+
+    def get_overlay(self, x, y):
+        """Get the overlay type at the given coordinates"""
+        if hasattr(self, 'overlay_map') and (x, y) in self.overlay_map:
+            sprite = self.overlay_map[(x, y)]
+            return sprite.name if hasattr(sprite, 'name') else None
+        return None 
