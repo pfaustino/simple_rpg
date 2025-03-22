@@ -1,0 +1,93 @@
+{
+    "fireball": {
+        "name": "Fireball",
+        "description": "Launch a ball of fire at the enemy",
+        "mp_cost": 15,
+        "damage": 30,
+        "type": "damage",
+        "element": "fire",
+        "level_requirement": 1
+    },
+    "ice_bolt": {
+        "name": "Ice Bolt",
+        "description": "Fire a bolt of ice that may freeze the target",
+        "mp_cost": 12,
+        "damage": 25,
+        "type": "damage",
+        "element": "ice",
+        "level_requirement": 1,
+        "effects": {
+            "freeze": {
+                "chance": 0.2,
+                "duration": 2,
+                "description": "Target is frozen and cannot act"
+            }
+        }
+    },
+    "lesser_heal": {
+        "name": "Lesser Heal",
+        "description": "Restore a small amount of HP to target",
+        "mp_cost": 10,
+        "heal_amount": 20,
+        "type": "heal",
+        "element": "holy",
+        "level_requirement": 1
+    },
+    "heal": {
+        "name": "Heal",
+        "description": "Restore a moderate amount of HP to target",
+        "mp_cost": 25,
+        "heal_amount": 50,
+        "type": "heal",
+        "element": "holy",
+        "level_requirement": 3
+    },
+    "greater_heal": {
+        "name": "Greater Heal",
+        "description": "Restore a large amount of HP to target",
+        "mp_cost": 40,
+        "heal_amount": 80,
+        "type": "heal",
+        "element": "holy",
+        "level_requirement": 5
+    },
+    "thunder": {
+        "name": "Thunder",
+        "description": "Call down lightning from the sky",
+        "mp_cost": 18,
+        "damage": 35,
+        "type": "damage",
+        "element": "lightning",
+        "level_requirement": 2
+    },
+    "protect": {
+        "name": "Protect",
+        "description": "Increase target's defense",
+        "mp_cost": 15,
+        "type": "buff",
+        "element": "holy",
+        "level_requirement": 2,
+        "effects": {
+            "defense_up": {
+                "amount": 5,
+                "duration": 3,
+                "description": "Defense increased by 5"
+            }
+        }
+    },
+    "haste": {
+        "name": "Haste",
+        "description": "Increase target's speed",
+        "mp_cost": 12,
+        "type": "buff",
+        "element": "wind",
+        "level_requirement": 3,
+        "effects": {
+            "speed_up": {
+                "amount": 3,
+                "duration": 3,
+                "description": "Speed increased by 3"
+            }
+        }
+    }
+} 

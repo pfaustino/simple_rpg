@@ -12,6 +12,7 @@ class MessageConsole:
         self.scroll_bar_width = 10
         self.is_scrolling = False
         self.scroll_start_y = 0
+        self.visible_lines = 0  # Will be calculated in draw method
         
     def add_message(self, message):
         """Add a new message to the console"""
@@ -23,7 +24,10 @@ class MessageConsole:
     
     def scroll_to_bottom(self):
         """Scroll to the bottom of the message history"""
-        self.scroll_offset = max(0, len(self.messages) - self.visible_lines)
+        if self.visible_lines > 0:
+            self.scroll_offset = max(0, len(self.messages) - self.visible_lines)
+        else:
+            self.scroll_offset = 0
     
     def handle_scroll(self, event, console_rect):
         """Handle scrolling events"""
@@ -183,4 +187,9 @@ class MessageConsole:
                     self.scroll_bar_width,
                     console_rect.height - 4
                 )
-                pygame.draw.rect(screen, (50, 50, 50), scroll_bg_rect) 
+                pygame.draw.rect(screen, (50, 50, 50), scroll_bg_rect)
+    
+    def update(self):
+        """Update message console state"""
+        # Update any message-specific timers or effects
+        pass  # For now, we don't have any message state that needs updating 

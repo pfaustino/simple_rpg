@@ -1,4 +1,5 @@
 import pygame
+import random
 
 # Constants for the game window
 CELL_SIZE = 60
@@ -40,15 +41,46 @@ TERRAIN_FOREST = 1
 TERRAIN_MOUNTAIN = 2
 TERRAIN_WATER = 3
 
-# Sound constants
-SOUND_ATTACK = 1000  # Hz
-SOUND_STRONG_ATTACK = 1200
-SOUND_HEAL = 800
-SOUND_LEVEL_UP = 1500
-SOUND_ENEMY_DEFEAT = 2000
-SOUND_PLAYER_DEFEAT = 500
-SOUND_FLEE = 600
-SOUND_EQUIP = 900  # Hz - New sound for equipping items
+# Screen dimensions
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
+TILE_SIZE = 32
+
+# Game states
+STATE_MENU = "menu"
+STATE_PLAYING = "playing"
+STATE_COMBAT = "combat"
+STATE_INVENTORY = "inventory"
+STATE_SAVE = "save"
+STATE_LOAD = "load"
+STATE_QUIT = "quit"
+
+# Sound effects
+SOUND_BUTTON_CLICK = "assets/sounds/pour_glass_water.wav"
+SOUND_LEVEL_UP = "assets/sounds/pour_glass_water.wav"
+SOUND_ITEM_PICKUP = "assets/sounds/pour_glass_water.wav"
+SOUND_COMBAT_START = "assets/sounds/CivilWarDrummer.wav"
+SOUND_COMBAT_END = "assets/sounds/pour_glass_water.wav"
+SOUND_ATTACK = "assets/sounds/Swords_Collide.wav"
+SOUND_HIT = "assets/sounds/Swords_Collide.wav"
+SOUND_MISS = "assets/sounds/pour_glass_water.wav"
+SOUND_DEATH = "assets/sounds/NeckBreaking.wav"
+SOUND_VICTORY = "assets/sounds/pour_glass_water.wav"
+SOUND_SPELL_CAST = "assets/sounds/pour_glass_water.wav"
+SOUND_SPELL_HIT = "assets/sounds/Swords_Collide.wav"
+SOUND_HEAL = "assets/sounds/pour_glass_water.wav"
+
+# Spell types
+SPELL_TYPE_DAMAGE = "damage"
+SPELL_TYPE_HEAL = "heal"
+SPELL_TYPE_BUFF = "buff"
+
+# Spell elements
+SPELL_ELEMENT_FIRE = "fire"
+SPELL_ELEMENT_ICE = "ice"
+SPELL_ELEMENT_LIGHTNING = "lightning"
+SPELL_ELEMENT_HOLY = "holy"
+SPELL_ELEMENT_WIND = "wind"
 
 # Loot tables for different enemy types
 LOOT_TABLES = {

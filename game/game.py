@@ -342,117 +342,75 @@ class Game:
         pygame.display.flip()
 
     def handle_movement(self, event):
-        """Handle player movement and game state updates"""
-        # Calculate player screen position (needed for all drawing operations)
-        player_screen_x = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
-        player_screen_y = (self.world.VIEWPORT_SIZE // 2) * self.world.CELL_SIZE
-        
-        # Regenerate 10 MP per movement action (if not in combat)
-        if not self.in_combat and event.type == pygame.KEYDOWN:
-            if event.key in [pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN]:
-                self.player.mp = min(self.player.max_mp, self.player.mp + 10)
-                if self.player.mp < self.player.max_mp:
-                    self.message_console.add_message("You recover 10 MP!")
-        
-        # Handle sprite debug view first
+        """Handle movement input"""
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                self.show_sprite_debug = not self.show_sprite_debug
-                if self.show_sprite_debug:
-                    self.world.sprite_debug_window.open()
-                else:
-                    self.world.sprite_debug_window.close()
-            elif event.key == pygame.K_i:  # Open inventory
-                self.show_inventory = True
-                return
-            elif event.key == pygame.K_ESCAPE:
-                self.system_menu.show()
-                return "menu"
-        
-        # Don't handle movement if in combat
-        if self.in_combat:
-            return "continue"
-        
-        # Forward only relevant events to sprite debug window if it's open
-        if self.show_sprite_debug:
-            if event.type in [pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN]:
-                if self.world.handle_sprite_debug_click(event.pos if hasattr(event, 'pos') else None, event):
-                    return "continue"
-            return "continue"
-        
-        # Handle regular game controls when not in sprite debug
-        if event.type == pygame.KEYDOWN:
-            moved = False
-            new_x, new_y = self.world.player_x, self.world.player_y
-            
-            if event.key == pygame.K_LEFT:
-                new_x -= 1
-            elif event.key == pygame.K_RIGHT:
-                new_x += 1
-            elif event.key == pygame.K_UP:
-                new_y -= 1
-            elif event.key == pygame.K_DOWN:
-                new_y += 1
-            
-            # Check if movement is valid and animate if it is
-            if (new_x, new_y) != (self.world.player_x, self.world.player_y):
-                if self.world.is_valid_move(new_x, new_y):
-                    # Store old position for animation
-                    old_x, old_y = self.world.player_x, self.world.player_y
-                    
-                    # Update position in world
-                    moved = self.world.move_player(new_x, new_y)
-                    
-                    if moved:
-                        # Animate the movement
-                        self.animate_movement(old_x, old_y, new_x, new_y)
-                        
-                        # Check for enemy encounter after movement
-                        if random.random() < 0.3 and not self.in_combat:
-                            enemy = self.create_enemy()
-                            self.in_combat = True  # Set combat state before starting battle
-                            self.battle(enemy)
-                            if not self.player.is_alive():
-                                self.show_game_over()
-                                return "quit"
-                            self.in_combat = False  # Reset combat state after battle
+            if event.key == pygame.K_ESCAPE:
+                return "quit"
             
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not self.show_sprite_debug:
-            # Get click position relative to viewport
+            # Get click position
             click_x, click_y = event.pos
-            viewport_x = click_x // self.world.CELL_SIZE
-            viewport_y = click_y // self.world.CELL_SIZE
             
-            # Convert viewport coordinates to world coordinates
-            world_x = self.world.player_x - (self.world.VIEWPORT_SIZE // 2) + viewport_x
-            world_y = self.world.player_y - (self.world.VIEWPORT_SIZE // 2) + viewport_y
+            # Calculate viewport area
+            status_height = 40  # Height of the status bar
+            console_height = 150  # Height of the console
+            viewport_height = self.height - status_height - console_height
             
-            # Get path to clicked location
-            path = self.world.get_path_to(world_x, world_y)
-            if path and not self.in_combat:
-                # Move along the path
-                for next_x, next_y in path:
-                    if self.world.is_valid_move(next_x, next_y):
-                        old_x, old_y = self.world.player_x, self.world.player_y
-                        if self.world.move_player(next_x, next_y):
-                            # Animate the movement
-                            self.animate_movement(old_x, old_y, next_x, next_y)
+            # Calculate the viewport size to be a multiple of cell size
+            viewport_cells = min(
+                (self.width // self.world.CELL_SIZE),
+                (viewport_height // self.world.CELL_SIZE)
+            )
+            if viewport_cells % 2 == 0:  # Ensure odd number of cells for proper centering
+                viewport_cells -= 1
+            
+            # Calculate the total viewport size in pixels
+            viewport_pixel_size = viewport_cells * self.world.CELL_SIZE
+            
+            # Calculate viewport position to center it
+            viewport_x = (self.width - viewport_pixel_size) // 2
+            viewport_y = status_height + (viewport_height - viewport_pixel_size) // 2
+            
+            # Calculate viewport boundaries
+            viewport_right = viewport_x + viewport_pixel_size
+            viewport_bottom = viewport_y + viewport_pixel_size
+            
+            # Check if click is within viewport bounds
+            if (viewport_x <= click_x <= viewport_right and 
+                viewport_y <= click_y <= viewport_bottom):
+                
+                # Convert click to viewport coordinates
+                viewport_tile_x = (click_x - viewport_x) // self.world.CELL_SIZE
+                viewport_tile_y = (click_y - viewport_y) // self.world.CELL_SIZE
+                
+                # Convert viewport coordinates to world coordinates
+                half_viewport = viewport_cells // 2
+                world_x = self.world.player_x + (viewport_tile_x - half_viewport)
+                world_y = self.world.player_y + (viewport_tile_y - half_viewport)
+                
+                # Debug output
+                print(f"Click at screen: ({click_x}, {click_y})")
+                print(f"Viewport bounds: ({viewport_x}, {viewport_y}) to ({viewport_right}, {viewport_bottom})")
+                print(f"Viewport tile pos: ({viewport_tile_x}, {viewport_tile_y})")
+                print(f"World target: ({world_x}, {world_y})")
+                print(f"Current player pos: ({self.world.player_x}, {self.world.player_y})")
+                
+                # Get path to clicked location
+                path = self.world.get_path_to(world_x, world_y)
+                if path and not self.in_combat:
+                    # Move along the path
+                    for next_x, next_y in path:
+                        if self.world.is_valid_move(next_x, next_y):
+                            if self.world.move_player(next_x, next_y):
+                                # If we get a combat encounter, stop moving
+                                return "continue"
                             
-                            # Regenerate 10 MP per movement step
-                            self.player.mp = min(self.player.max_mp, self.player.mp + 10)
-                            if self.player.mp < self.player.max_mp:
-                                self.message_console.add_message("You recover 10 MP!")
+                            # Update the display after each step
+                            self.world.display_viewport(self.screen, next_x, next_y, viewport_y)
+                            pygame.display.flip()
                             
-                            # Check for enemy encounter
-                            if random.random() < 0.3 and not self.in_combat:
-                                enemy = self.create_enemy()
-                                self.in_combat = True  # Set combat state before starting battle
-                                self.battle(enemy)
-                                if not self.player.is_alive():
-                                    self.show_game_over()
-                                    return "quit"
-                                self.in_combat = False  # Reset combat state after battle
-                                break
+                            # Small delay between moves for smooth animation
+                            pygame.time.delay(50)
         
         return "continue"
 
@@ -525,9 +483,9 @@ class Game:
                 elif event.type == pygame.VIDEORESIZE:
                     self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
                     self.width, self.height = event.w, event.h
-                    self.message_console.scroll_to_bottom()  # Reset scroll position on resize
-                    self.system_menu.resize(event.w, event.h)  # Update menu positions
-                    self.world.resize(event.w, event.h)  # Update world viewport size
+                    self.message_console.scroll_to_bottom()
+                    self.system_menu.resize(event.w, event.h)
+                    self.world.resize(event.w, event.h)
                 
                 # Debug keyboard events - add this before any other keyboard handling
                 if event.type == pygame.KEYDOWN:
@@ -554,9 +512,9 @@ class Game:
                         if menu_action == "Continue":
                             self.system_menu.hide()
                         elif menu_action == "New Game":
-                            # Reset player and world
                             self.player = self.create_player()
                             self.world = World(self.player)
+                            self.world.game = self
                             self.system_menu.hide()
                         elif menu_action == "Tools":
                             self.show_sprite_debug = not self.show_sprite_debug
@@ -570,14 +528,9 @@ class Game:
                     continue
                 
                 # Handle console scrolling
-                console_rect = pygame.Rect(
-                    0,
-                    self.height - 150,  # Console height
-                    self.width,
-                    150
-                )
+                console_rect = pygame.Rect(0, self.height - 150, self.width, 150)
                 if self.message_console.handle_scroll(event, console_rect):
-                    continue  # Skip other event processing if console handled the event
+                    continue
                 
                 # Handle other events based on game state
                 if self.show_inventory:
@@ -592,16 +545,38 @@ class Game:
             # Clear the screen
             self.screen.fill(WHITE)
             
-            # Draw the game world in the middle area (between status bar and console)
+            # Calculate viewport area
             status_height = 40  # Height of the status bar
             console_height = 150  # Height of the console
             viewport_height = self.height - status_height - console_height
-            self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y, status_height)
             
-            # Draw the player
-            player_screen_x = self.width // 2
-            player_screen_y = status_height + (viewport_height // 2)
-            self.player.draw(self.screen, player_screen_x, player_screen_y)
+            # Calculate the viewport size to be a multiple of cell size
+            viewport_cells = min(
+                (self.width // self.world.CELL_SIZE),
+                (viewport_height // self.world.CELL_SIZE)
+            )
+            if viewport_cells % 2 == 0:  # Ensure odd number of cells for proper centering
+                viewport_cells -= 1
+            
+            # Update the world's viewport size
+            self.world.VIEWPORT_SIZE = viewport_cells
+            
+            # Calculate the total viewport size in pixels
+            viewport_pixel_size = viewport_cells * self.world.CELL_SIZE
+            
+            # Calculate viewport position to center it
+            viewport_x = (self.width - viewport_pixel_size) // 2
+            viewport_y = status_height + (viewport_height - viewport_pixel_size) // 2
+            
+            # Draw the world with the player at the center
+            self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y, viewport_y)
+            
+            # Calculate the exact pixel position for the player to be centered on a tile
+            player_screen_x = viewport_x + (viewport_pixel_size // 2)
+            player_screen_y = viewport_y + (viewport_pixel_size // 2)
+            
+            # Draw the player centered on the tile
+            self.player.draw(self.screen, player_screen_x - (self.world.CELL_SIZE // 2), player_screen_y - (self.world.CELL_SIZE // 2))
             
             # Draw UI overlays based on game state
             if self.show_inventory:
@@ -611,7 +586,7 @@ class Game:
             
             # Always draw persistent UI elements last
             self.draw_player_status()  # Draw status bar at the top
-            self.message_console.draw(self.screen, 0, self.height - 150, self.width, 150)  # Draw console at the bottom
+            self.message_console.draw(self.screen, 0, self.height - 150, self.width, 150)
             
             # Draw system menu if visible
             self.system_menu.draw(self.screen)
@@ -1152,8 +1127,8 @@ class Game:
             attack=15,
             defense=10,
             speed=10,
-            mp=50,  # Add initial MP
-            max_mp=50  # Add max MP
+            mp=50,
+            max_mp=50
         )
         
         # Add starting items
@@ -1161,7 +1136,13 @@ class Game:
         player.inventory.add_item("Mana Potion", 2)
         
         # Add starting spells
-        player.known_spells = ['fireball', 'lesser_heal']  # Start with basic spells
+        player.known_spells = ['fireball', 'lesser_heal']
+        
+        # Set initial position to center of world
+        self.world = World(player)
+        world_size = self.world.WORLD_SIZE
+        self.world.player_x = world_size // 2
+        self.world.player_y = world_size // 2
         
         return player
 
