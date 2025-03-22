@@ -397,13 +397,23 @@ class Game:
                 
                 # Get path to clicked location
                 path = self.world.get_path_to(world_x, world_y)
-                if path and not self.in_combat:
+                if path and not self.combat_system.in_combat:
                     # Move along the path
                     for next_x, next_y in path:
                         if self.world.is_valid_move(next_x, next_y):
-                            if self.world.move_player(next_x, next_y):
-                                # If we get a combat encounter, stop moving
-                                return "continue"
+                            # Check for encounters before moving
+                            if random.random() < 0.1:  # 10% chance of encounter
+                                # Create an enemy
+                                enemy = self.create_enemy()
+                                if enemy:
+                                    # Start combat
+                                    play_sound(SOUND_COMBAT_START)
+                                    self.message_console.add_message(f"A {enemy.name} appears!")
+                                    self.combat_system.start_combat(enemy)
+                                    return "continue"
+                            
+                            # Move the player
+                            self.world.move_player(next_x, next_y)
                             
                             # Update the display after each step
                             self.world.display_viewport(self.screen, next_x, next_y, viewport_y)
@@ -477,126 +487,65 @@ class Game:
         
         while running:
             # Handle events
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                elif event.type == pygame.VIDEORESIZE:
-                    self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
-                    self.width, self.height = event.w, event.h
-                    self.message_console.scroll_to_bottom()
-                    self.system_menu.resize(event.w, event.h)
-                    self.world.resize(event.w, event.h)
-                
-                # Debug keyboard events - add this before any other keyboard handling
-                if event.type == pygame.KEYDOWN:
-                    print(f"Key pressed: {pygame.key.name(event.key)} (key code: {event.key})")
-                    # Handle teleport home (H key) - only when not in combat or inventory
-                    if event.key == pygame.K_h:
-                        print("H key detected!")
-                        if not self.in_combat and not self.show_inventory and not self.system_menu.is_visible:
-                            print("Attempting teleport...")
-                            # Teleport player home
-                            self.world.player_x = 0
-                            self.world.player_y = 0
-                            self.message_console.add_message("You have been teleported home!")
-                            # Force a redraw
-                            self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y)
-                            pygame.display.flip()
-                            print("Teleport complete!")
-                            continue
-                
-                # Handle system menu first if it's visible
-                if self.system_menu.is_visible:
-                    menu_action = self.system_menu.handle_event(event)
-                    if menu_action:
-                        if menu_action == "Continue":
-                            self.system_menu.hide()
-                        elif menu_action == "Save Game":
-                            # Save the game
-                            if save_game(self.player, self.world):
-                                self.message_console.add_message("Game saved successfully!")
-                            else:
-                                self.message_console.add_message("Failed to save game!")
-                            self.system_menu.hide()
-                        elif menu_action == "New Game":
-                            self.player = self.create_player()
-                            self.world = World(self.player)
-                            self.world.game = self
-                            self.system_menu.hide()
-                        elif menu_action == "Tools":
-                            self.show_sprite_debug = not self.show_sprite_debug
-                            if self.show_sprite_debug:
-                                self.world.sprite_debug_window.open()
-                            else:
-                                self.world.sprite_debug_window.close()
-                            self.system_menu.hide()
-                        elif menu_action == "Quit Game":
-                            running = False
-                    continue
-                
-                # Handle console scrolling
-                console_rect = pygame.Rect(0, self.height - 150, self.width, 150)
-                if self.message_console.handle_scroll(event, console_rect):
-                    continue
-                
-                # Handle other events based on game state
-                if self.show_inventory:
-                    self.handle_inventory_input(event)
-                elif self.show_sprite_debug:
-                    self.handle_sprite_debug_input(event)
-                else:
-                    result = self.handle_movement(event)
-                    if result == "quit":
-                        self.system_menu.show()
+            result = self.handle_events()
+            if result == "quit":
+                running = False
+                continue
             
             # Clear the screen
-            self.screen.fill(WHITE)
+            self.screen.fill(BLACK)
             
-            # Calculate viewport area
-            status_height = 40  # Height of the status bar
-            console_height = 150  # Height of the console
-            viewport_height = self.height - status_height - console_height
-            
-            # Calculate the viewport size to be a multiple of cell size
-            viewport_cells = min(
-                (self.width // self.world.CELL_SIZE),
-                (viewport_height // self.world.CELL_SIZE)
-            )
-            if viewport_cells % 2 == 0:  # Ensure odd number of cells for proper centering
-                viewport_cells -= 1
-            
-            # Update the world's viewport size
-            self.world.VIEWPORT_SIZE = viewport_cells
-            
-            # Calculate the total viewport size in pixels
-            viewport_pixel_size = viewport_cells * self.world.CELL_SIZE
-            
-            # Calculate viewport position to center it
-            viewport_x = (self.width - viewport_pixel_size) // 2
-            viewport_y = status_height + (viewport_height - viewport_pixel_size) // 2
-            
-            # Draw the world with the player at the center
-            self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y, viewport_y)
-            
-            # Calculate the exact pixel position for the player to be centered on a tile
-            player_screen_x = viewport_x + (viewport_pixel_size // 2)
-            player_screen_y = viewport_y + (viewport_pixel_size // 2)
-            
-            # Draw the player centered on the tile
-            self.player.draw(self.screen, player_screen_x - (self.world.CELL_SIZE // 2), player_screen_y - (self.world.CELL_SIZE // 2))
-            
-            # Draw UI overlays based on game state
-            if self.show_inventory:
-                self.draw_inventory_screen()
-            elif self.show_sprite_debug:
-                self.draw_sprite_debug()
+            # Draw the current game state
+            if self.combat_system.in_combat:
+                # Draw combat screen
+                self.combat_system.draw_combat_screen()
+            else:
+                # Calculate viewport area
+                status_height = 40  # Height of the status bar
+                console_height = 150  # Height of the console
+                viewport_height = self.height - status_height - console_height
+                
+                # Calculate the viewport size to be a multiple of cell size
+                viewport_cells = min(
+                    (self.width // self.world.CELL_SIZE),
+                    (viewport_height // self.world.CELL_SIZE)
+                )
+                if viewport_cells % 2 == 0:  # Ensure odd number of cells for proper centering
+                    viewport_cells -= 1
+                
+                # Update the world's viewport size
+                self.world.VIEWPORT_SIZE = viewport_cells
+                
+                # Calculate the total viewport size in pixels
+                viewport_pixel_size = viewport_cells * self.world.CELL_SIZE
+                
+                # Calculate viewport position to center it
+                viewport_x = (self.width - viewport_pixel_size) // 2
+                viewport_y = status_height + (viewport_height - viewport_pixel_size) // 2
+                
+                # Draw the world with the player at the center
+                self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y, viewport_y)
+                
+                # Calculate the exact pixel position for the player to be centered on a tile
+                player_screen_x = viewport_x + (viewport_pixel_size // 2)
+                player_screen_y = viewport_y + (viewport_pixel_size // 2)
+                
+                # Draw the player centered on the tile
+                self.player.draw(self.screen, player_screen_x - (self.world.CELL_SIZE // 2), player_screen_y - (self.world.CELL_SIZE // 2))
+                
+                # Draw UI overlays based on game state
+                if self.show_inventory:
+                    self.draw_inventory_screen()
+                elif self.show_sprite_debug:
+                    self.draw_sprite_debug()
             
             # Always draw persistent UI elements last
             self.draw_player_status()  # Draw status bar at the top
             self.message_console.draw(self.screen, 0, self.height - 150, self.width, 150)
             
             # Draw system menu if visible
-            self.system_menu.draw(self.screen)
+            if self.system_menu.is_visible:
+                self.system_menu.draw(self.screen)
             
             # Update the display
             pygame.display.flip()
@@ -636,7 +585,7 @@ class Game:
                         self.world.player_y = SCREEN_HEIGHT // (2 * TILE_SIZE)
                         
                         # End combat and clear any status effects
-                        self.in_combat = False
+                        self.combat_system.in_combat = False
                         self.current_enemy = None
                         self.player.status_effects.clear()
                         
@@ -974,44 +923,96 @@ class Game:
             if event.type == pygame.QUIT:
                 return "quit"
             
-            # Debug keyboard events
-            if event.type == pygame.KEYDOWN:
-                print(f"Key pressed: {pygame.key.name(event.key)} (key code: {event.key})")
-                if event.key == pygame.K_h:
-                    print("H key detected!")
-                    if not self.in_combat and not self.show_inventory:
-                        print("Attempting teleport...")
-                        # Teleport player home
-                        self.world.player_x = 0
-                        self.world.player_y = 0
-                        self.message_console.add_message("You have been teleported home!")
-                        # Force a redraw
-                        self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y)
-                        pygame.display.flip()
-                        print("Teleport complete!")
-                        continue
+            # Handle system menu first if it's visible
+            if self.system_menu.is_visible:
+                menu_action = self.system_menu.handle_event(event)
+                if menu_action:
+                    if menu_action == "Continue":
+                        self.system_menu.hide()
+                    elif menu_action == "Save Game":
+                        # Save the game
+                        if save_game(self.player, self.world):
+                            self.message_console.add_message("Game saved successfully!")
+                        else:
+                            self.message_console.add_message("Failed to save game!")
+                        self.system_menu.hide()
+                    elif menu_action == "New Game":
+                        self.player = self.create_player()
+                        self.world = World(self.player)
+                        self.world.game = self
+                        self.system_menu.hide()
+                    elif menu_action == "Tools":
+                        self.show_sprite_debug = not self.show_sprite_debug
+                        if self.show_sprite_debug:
+                            self.world.sprite_debug_window.open()
+                        else:
+                            self.world.sprite_debug_window.close()
+                        self.system_menu.hide()
+                    elif menu_action == "Quit Game":
+                        return "quit"
+                continue
             
+            # Handle window resize
             if event.type == pygame.VIDEORESIZE:
+                self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+                self.width, self.height = event.w, event.h
+                self.message_console.scroll_to_bottom()
+                self.system_menu.resize(event.w, event.h)
                 self.world.resize(event.w, event.h)
                 continue
             
+            # Handle combat input if in combat
+            if self.combat_system.in_combat:
+                if event.type == pygame.KEYDOWN:
+                    print(f"Combat keypress detected: {pygame.key.name(event.key)} (key code: {event.key})")
+                    if event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]:
+                        # Map number keys to combat options
+                        option_map = {
+                            pygame.K_1: "Attack",
+                            pygame.K_2: "Strong Attack",
+                            pygame.K_3: "Heal",
+                            pygame.K_4: "Flee"
+                        }
+                        selected_action = option_map[event.key]
+                        print(f"Processing combat action: {selected_action}")
+                        result = self.combat_system.handle_combat_action(selected_action)
+                        print(f"Combat action result: {result}")
+                        if result == "combat_end":
+                            return "continue"
+                        elif result == "game_over":
+                            return self.show_game_over()
+                    elif event.key == pygame.K_ESCAPE:
+                        # Try to flee combat
+                        result = self.combat_system.handle_combat_action("Flee")
+                        if result == "combat_end":
+                            return "continue"
+                continue
+            
             # Handle console scrolling
-            console_rect = pygame.Rect(
-                0,
-                self.height - 150,  # Console height
-                self.width,
-                150
-            )
+            console_rect = pygame.Rect(0, self.height - 150, self.width, 150)
             if self.message_console.handle_scroll(event, console_rect):
-                continue  # Skip other event processing if console handled the event
+                continue
+            
+            # Handle keyboard events for non-combat situations
+            if event.type == pygame.KEYDOWN:
+                print(f"Key pressed: {pygame.key.name(event.key)} (key code: {event.key})")
+                if event.key == pygame.K_h and not self.show_inventory:
+                    print("H key detected!")
+                    # Teleport player home
+                    self.world.player_x = 0
+                    self.world.player_y = 0
+                    self.message_console.add_message("You have been teleported home!")
+                    # Force a redraw
+                    self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y)
+                    pygame.display.flip()
+                    print("Teleport complete!")
+                    continue
+                elif event.key == pygame.K_ESCAPE:
+                    self.system_menu.show()
+                    continue
             
             # Handle other events based on game state
-            if self.in_combat:
-                result = self.combat_system.handle_combat_turn(event)
-                if result == "game_over":
-                    self.show_game_over()
-                    return "quit"
-            elif self.show_inventory:
+            if self.show_inventory:
                 self.handle_inventory_input(event)
             elif self.show_sprite_debug:
                 self.handle_sprite_debug_input(event)
@@ -1044,7 +1045,7 @@ class Game:
 
     def update(self):
         """Update game state"""
-        if self.in_combat:
+        if self.combat_system.in_combat:
             # Update combat system
             self.combat_system.update()
         else:
@@ -1063,7 +1064,7 @@ class Game:
         # Clear the screen
         self.screen.fill(BLACK)
         
-        if self.in_combat:
+        if self.combat_system.in_combat:
             # Draw combat screen
             self.combat_system.draw_combat_screen()
         else:
@@ -1155,7 +1156,7 @@ class Game:
 
     def handle_combat_turn(self, event):
         """Handle a single turn of combat"""
-        if not self.in_combat:
+        if not self.combat_system.in_combat:
             return "continue"
 
         # Update status effects
