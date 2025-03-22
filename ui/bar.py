@@ -1,5 +1,5 @@
 import pygame
-from utils.constants import WHITE, BLACK, RED, GREEN, BLUE, YELLOW
+from utils.constants import WHITE, BLACK, RED, GREEN, BLUE, YELLOW, PURPLE
 
 class Bar:
     """A UI component for drawing various types of bars (health, mana, xp, etc.)"""
@@ -48,7 +48,8 @@ class Bar:
         fill_width = int(width * xp_percent)
         
         # Draw background
-        pygame.draw.rect(surface, (50, 50, 50), (x, y, width, height))
+        xp_color = PURPLE
+        pygame.draw.rect(surface, xp_color, (x, y, width, height))
         
         # Draw filled portion
         if fill_width > 0:

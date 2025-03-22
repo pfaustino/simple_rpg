@@ -219,7 +219,13 @@ class World:
         self.world_map = {}
         self.overlay_map = {}  # Initialize overlay map
         self.CELL_SIZE = 32
-        self.VIEWPORT_SIZE = WINDOW_SIZE // self.CELL_SIZE
+        self.viewport_cells_x = WINDOW_SIZE // self.CELL_SIZE
+        self.viewport_cells_y = WINDOW_SIZE // self.CELL_SIZE
+        # Make both dimensions odd for proper centering
+        if self.viewport_cells_x % 2 == 0:
+            self.viewport_cells_x -= 1
+        if self.viewport_cells_y % 2 == 0:
+            self.viewport_cells_y -= 1
         self.WORLD_SIZE = 100  # 100x100 world size
         self.screen = None
         self.window_width = WINDOW_SIZE
@@ -267,7 +273,17 @@ class World:
         """Handle window resize events"""
         self.window_width, self.window_height = size
         self.screen = pygame.display.set_mode((self.window_width, self.window_height), pygame.RESIZABLE)
-        self.VIEWPORT_SIZE = self.window_width // self.CELL_SIZE
+        
+        # Calculate viewport size in cells for both dimensions
+        self.viewport_cells_x = self.window_width // self.CELL_SIZE
+        self.viewport_cells_y = (self.window_height - 190) // self.CELL_SIZE  # Account for UI elements
+        
+        # Make both dimensions odd for proper centering
+        if self.viewport_cells_x % 2 == 0:
+            self.viewport_cells_x -= 1
+        if self.viewport_cells_y % 2 == 0:
+            self.viewport_cells_y -= 1
+            
         self._calculate_max_scroll()
 
     def handle_sprite_debug_click(self, pos, event):
@@ -397,15 +413,18 @@ class World:
         self.screen = screen
         
         # Calculate the visible area, ensuring player is centered
-        half_viewport = self.VIEWPORT_SIZE // 2
-        start_x = player_x - half_viewport
-        start_y = player_y - half_viewport
-        end_x = player_x + half_viewport + 1
-        end_y = player_y + half_viewport + 1
+        half_viewport_x = self.viewport_cells_x // 2
+        half_viewport_y = self.viewport_cells_y // 2
+        start_x = player_x - half_viewport_x
+        start_y = player_y - half_viewport_y
+        end_x = player_x + half_viewport_x + 1
+        end_y = player_y + half_viewport_y + 1
         
         # Calculate the offset to center the viewport
-        offset_x = (self.window_width - (self.VIEWPORT_SIZE * self.CELL_SIZE)) // 2
-        offset_y = status_height + (self.window_height - status_height - 150 - (self.VIEWPORT_SIZE * self.CELL_SIZE)) // 2
+        viewport_pixel_width = self.viewport_cells_x * self.CELL_SIZE
+        viewport_pixel_height = self.viewport_cells_y * self.CELL_SIZE
+        offset_x = (self.window_width - viewport_pixel_width) // 2
+        offset_y = status_height + (self.window_height - status_height - 150 - viewport_pixel_height) // 2
         
         # Draw visible terrain
         for y in range(start_y, end_y):
@@ -442,7 +461,8 @@ class World:
         # Store these for player drawing
         self.viewport_offset_x = offset_x
         self.viewport_offset_y = offset_y
-        self.half_viewport = half_viewport
+        self.half_viewport_x = half_viewport_x
+        self.half_viewport_y = half_viewport_y
 
     def get_terrain(self, x, y):
         """Get the terrain type at the given coordinates"""
@@ -485,17 +505,14 @@ class World:
         
         # Calculate viewport size to ensure player is centered on a single tile
         # Subtract margins and ensure odd number of tiles
-        viewport_width = (self.window_width - 40) // self.CELL_SIZE
-        viewport_height = (self.window_height - 190) // self.CELL_SIZE
+        self.viewport_cells_x = (self.window_width - 40) // self.CELL_SIZE
+        self.viewport_cells_y = (self.window_height - 190) // self.CELL_SIZE  # Account for UI elements
         
         # Make sure both dimensions are odd for perfect centering
-        if viewport_width % 2 == 0:
-            viewport_width -= 1
-        if viewport_height % 2 == 0:
-            viewport_height -= 1
-            
-        # Use the smaller dimension to ensure square viewport
-        self.VIEWPORT_SIZE = min(viewport_width, viewport_height)
+        if self.viewport_cells_x % 2 == 0:
+            self.viewport_cells_x -= 1
+        if self.viewport_cells_y % 2 == 0:
+            self.viewport_cells_y -= 1
         
         # Update the screen surface with new dimensions
         self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
@@ -516,8 +533,8 @@ class World:
         
         # Calculate exact player position
         # The player should be exactly half_viewport tiles from the start of the viewport
-        player_screen_x = self.half_viewport * self.CELL_SIZE + self.viewport_offset_x
-        player_screen_y = self.half_viewport * self.CELL_SIZE + self.viewport_offset_y
+        player_screen_x = self.half_viewport_x * self.CELL_SIZE + self.viewport_offset_x
+        player_screen_y = self.half_viewport_y * self.CELL_SIZE + self.viewport_offset_y
         
         # Draw the player
         self.player.draw(screen, player_screen_x, player_screen_y)
