@@ -529,6 +529,24 @@ class Game:
                     self.system_menu.resize(event.w, event.h)  # Update menu positions
                     self.world.resize(event.w, event.h)  # Update world viewport size
                 
+                # Debug keyboard events - add this before any other keyboard handling
+                if event.type == pygame.KEYDOWN:
+                    print(f"Key pressed: {pygame.key.name(event.key)} (key code: {event.key})")
+                    # Handle teleport home (H key) - only when not in combat or inventory
+                    if event.key == pygame.K_h:
+                        print("H key detected!")
+                        if not self.in_combat and not self.show_inventory and not self.system_menu.is_visible:
+                            print("Attempting teleport...")
+                            # Teleport player home
+                            self.world.player_x = 0
+                            self.world.player_y = 0
+                            self.message_console.add_message("You have been teleported home!")
+                            # Force a redraw
+                            self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y)
+                            pygame.display.flip()
+                            print("Teleport complete!")
+                            continue
+                
                 # Handle system menu first if it's visible
                 if self.system_menu.is_visible:
                     menu_action = self.system_menu.handle_event(event)
@@ -608,15 +626,46 @@ class Game:
         pygame.quit()
 
     def show_game_over(self):
-        """Show the game over screen"""
+        """Show the game over screen and handle resurrection"""
         self.world.screen.fill(BLACK)
         self.world.draw_text("Game Over!", (SCREEN_WIDTH//2 - 50, SCREEN_HEIGHT//2 - 50), WHITE)
         self.world.draw_text(f"Final level: {self.player.level}", 
                            (SCREEN_WIDTH//2 - 50, SCREEN_HEIGHT//2), WHITE)
         self.world.draw_text(f"Final location: ({self.world.player_x}, {self.world.player_y})", 
                            (SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT//2 + 50), WHITE)
+        self.world.draw_text("Press SPACE to resurrect at the nearest town", 
+                           (SCREEN_WIDTH//2 - 150, SCREEN_HEIGHT//2 + 100), WHITE)
         pygame.display.flip()
-        time.sleep(3)
+
+        # Wait for player input
+        waiting_for_input = True
+        while waiting_for_input:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return "quit"
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        # Resurrect player
+                        self.player.health = self.player.max_health // 2  # Resurrect with half health
+                        self.player.mp = self.player.max_mp // 2      # Resurrect with half mp
+                        
+                        # Find nearest town coordinates (for now just starting position)
+                        self.world.player_x = SCREEN_WIDTH // (2 * TILE_SIZE)
+                        self.world.player_y = SCREEN_HEIGHT // (2 * TILE_SIZE)
+                        
+                        # End combat and clear any status effects
+                        self.in_combat = False
+                        self.current_enemy = None
+                        self.player.status_effects.clear()
+                        
+                        # Add resurrection message
+                        self.message_console.add_message("You have been resurrected in town.")
+                        return "continue"
+                    elif event.key == pygame.K_ESCAPE:
+                        return "quit"
+            
+            # Small delay to prevent high CPU usage
+            time.sleep(0.1)
 
     def draw_inventory_screen(self):
         """Draw the inventory screen overlay"""
@@ -938,24 +987,31 @@ class Game:
             self.world.screen.blit(text_surface, (50, 350 + i * 30))
 
     def handle_events(self):
-        """Handle game events"""
+        """Handle all game events"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "quit"
             
-            # Handle system menu
-            if self.system_menu.is_visible:
-                menu_action = self.system_menu.handle_event(event)
-                if menu_action:
-                    if menu_action == "Save Game":
-                        save_game(self.player, self.world)
-                    elif menu_action == "Load Game":
-                        save_data = load_game()
-                        if save_data:
-                            self.load_game_state(save_data)
-                    elif menu_action == "Quit Game":
-                        return "quit"
+            # Debug keyboard events
+            if event.type == pygame.KEYDOWN:
+                print(f"Key pressed: {pygame.key.name(event.key)} (key code: {event.key})")
+                if event.key == pygame.K_h:
+                    print("H key detected!")
+                    if not self.in_combat and not self.show_inventory:
+                        print("Attempting teleport...")
+                        # Teleport player home
+                        self.world.player_x = 0
+                        self.world.player_y = 0
+                        self.message_console.add_message("You have been teleported home!")
+                        # Force a redraw
+                        self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y)
+                        pygame.display.flip()
+                        print("Teleport complete!")
                         continue
+            
+            if event.type == pygame.VIDEORESIZE:
+                self.world.resize(event.w, event.h)
+                continue
             
             # Handle console scrolling
             console_rect = pygame.Rect(
