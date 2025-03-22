@@ -1,5 +1,5 @@
 import pygame
-from utils.constants import FONT_SIZE, BLACK, WHITE, MAX_CONSOLE_MESSAGES
+from utils.constants import FONT_SIZE, BLACK, WHITE, MAX_CONSOLE_MESSAGES, SCREEN_WIDTH, SCREEN_HEIGHT
 
 class MessageConsole:
     def __init__(self):

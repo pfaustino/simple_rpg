@@ -93,6 +93,7 @@ class Game:
             self.player.attack = save_data["player"]["attack"]
             self.player.mp = save_data["player"].get("mp", 50)  # Restore MP
             self.player.max_mp = save_data["player"].get("max_mp", 50)  # Restore max MP
+            self.player.gold = save_data["player"].get("gold", 0)  # Explicitly restore player's gold
             # Restore kill stats
             self.player.kills = save_data["player"].get("kills", {})
             # Restore inventory if it exists
@@ -438,8 +439,8 @@ class Game:
         gold_items = [item for item in loot if item.name == "Gold"]
         total_gold = sum(item.value for item in gold_items)
         
-        # Add gold to inventory
-        self.player.inventory.gold += total_gold
+        # Add gold directly to player gold instead of inventory
+        self.player.gold += total_gold
         
         # Add non-gold items to inventory
         non_gold_items = [item for item in loot if item.name != "Gold"]
@@ -474,7 +475,7 @@ class Game:
         self.message_console.add_message("Game autosaved!")
         
         # Force console to update and display the autosave message
-        self.message_console.draw(self.screen, 0, SCREEN_HEIGHT - 150, SCREEN_WIDTH, 150)
+        self.message_console.draw(self.screen, 0, SCREEN_HEIGHT - 150, (SCREEN_WIDTH*0.8), 150)
         pygame.display.flip()
 
     def run(self):
@@ -541,7 +542,7 @@ class Game:
             
             # Always draw persistent UI elements last
             self.draw_player_status()  # Draw status bar at the top
-            self.message_console.draw(self.screen, 0, self.height - 150, self.width, 150)
+            self.draw_game_state()
             
             # Draw system menu if visible
             if self.system_menu.is_visible:
@@ -769,11 +770,6 @@ class Game:
         # Draw XP bar with level label inside
         self.bar_renderer.draw_xp_bar(self.screen, self.player, 10, 60)
         
-        # Draw gold counter
-        gold_text = f"Gold: {self.player.inventory.gold}"
-        text = self.font.render(gold_text, True, YELLOW)
-        self.screen.blit(text, (10, 85))
-
     def draw_combat_screen(self):
         """Draw the combat screen with all UI elements"""
         # Draw the base game world first
@@ -1001,12 +997,18 @@ class Game:
                     # Teleport player home
                     self.world.player_x = 0
                     self.world.player_y = 0
-                    self.message_console.add_message("You have been teleported home!")
+                    self.message_console.add_message("You have been teleported home! Health and MP restored." + str(self.player.max_mp))
+                    self.player.health = self.player.max_health
+                    self.player.mp = self.player.max_mp
                     # Force a redraw
                     self.world.display_viewport(self.screen, self.world.player_x, self.world.player_y)
                     pygame.display.flip()
                     print("Teleport complete!")
                     continue
+                elif event.key == pygame.K_i:
+                    self.message_console.add_message("I key detected! Attempting to show inventory...")
+                    self.show_inventory = not self.show_inventory
+                    continue                
                 elif event.key == pygame.K_ESCAPE:
                     self.system_menu.show()
                     continue
@@ -1218,6 +1220,7 @@ class Game:
         self.player.attack = save_data["player"]["attack"]
         self.player.mp = save_data["player"].get("mp", 50)  # Restore MP
         self.player.max_mp = save_data["player"].get("max_mp", 50)  # Restore max MP
+        self.player.gold = save_data["player"].get("gold", 0)  # Explicitly restore player's gold
         # Restore kill stats
         self.player.kills = save_data["player"].get("kills", {})
         # Restore inventory if it exists
@@ -1264,3 +1267,27 @@ class Game:
         self.combat_system = CombatSystem(self)
         
         self.bar_renderer = Bar() 
+
+    def draw_game_state(self):
+        """Draw the current game state including world, UI, and any active windows"""
+        # Draw the main console with the new width
+        console_height = 150  # Set your desired console height
+        main_console_width = int(self.width * 0.75)  # 75% of the screen width
+        console_x = 0  # Position it at the left edge
+        console_y = self.height - console_height  # Position it at the bottom
+        
+        # Draw the main console
+        self.message_console.draw(self.screen, console_x, console_y, main_console_width, console_height)
+        
+        # Draw the mini console to the right of the main console
+        mini_console_width = int(self.width * 0.25)  # 25% of the screen width
+        mini_console_x = main_console_width  # Position it right next to the main console
+        mini_console_y = console_y  # Align it with the main console
+        pygame.draw.rect(self.screen, (100, 100, 100), (mini_console_x, mini_console_y, mini_console_width, console_height))  # Draw mini console background
+        pygame.draw.rect(self.screen, WHITE, (mini_console_x, mini_console_y, mini_console_width, console_height), 2)  # Draw border for visibility
+        
+        # Draw Gold amount (combining character gold and inventory gold)
+        total_gold = self.player.gold + self.player.inventory.gold
+        gold_text = f"Gold: {total_gold}"
+        gold_surface = self.font.render(gold_text, True, WHITE)  # Render the text
+        self.screen.blit(gold_surface, (mini_console_x + 10, mini_console_y + 10))  # Position the text in the mini console 

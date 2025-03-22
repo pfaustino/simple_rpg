@@ -181,8 +181,8 @@ class CombatSystem:
             self.game.screen.blit(text, (20, 120 + i * 30))
         
         # Draw message console at the bottom
-        console_height = 150
-        self.game.message_console.draw(self.game.screen, 0, SCREEN_HEIGHT - console_height, SCREEN_WIDTH, console_height)
+        # console_height = 150
+        # self.game.message_console.draw(self.game.screen, 0, SCREEN_HEIGHT - console_height, SCREEN_WIDTH, console_height)
 
     def update(self):
         """Update combat system state"""

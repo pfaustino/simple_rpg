@@ -5,7 +5,7 @@ class Bar:
     """A UI component for drawing various types of bars (health, mana, xp, etc.)"""
     
     def __init__(self):
-        self.bar_width = 200
+        self.bar_width = 300
         self.bar_height = 20
         self.border_width = 2
         self.border_color = WHITE
@@ -37,10 +37,32 @@ class Bar:
         text_rect = text.get_rect(center=(x + self.bar_width/2, y + self.bar_height/2))
         screen.blit(text, text_rect)
     
+   
+    def draw_mp_bar(self, screen, character, x, y):
+        """Draw a mana points bar for a character"""
+        # Draw border
+        pygame.draw.rect(screen, self.border_color, (x, y, self.bar_width, self.bar_height), self.border_width)
+        
+        # Calculate MP percentage
+        mp_percent = character.mp / character.max_mp if character.max_mp > 0 else 0
+        
+        # Draw MP bar
+        mp_width = int(self.bar_width * mp_percent)
+        pygame.draw.rect(screen, self.mp_color, 
+                        (x + self.border_width, y + self.border_width, 
+                         mp_width - self.border_width * 2, 
+                         self.bar_height - self.border_width * 2))
+        
+        # Draw MP text
+        mp_text = f"MP: {character.mp}/{character.max_mp}"
+        text = self.font.render(mp_text, True, self.text_color)
+        text_rect = text.get_rect(center=(x + self.bar_width/2, y + self.bar_height/2))
+        screen.blit(text, text_rect) 
+        
     def draw_xp_bar(self, surface, character, x, y):
         """Draw an XP bar with level label"""
         # Bar dimensions
-        width = 200
+        width = self.bar_width
         height = 20
         
         # Calculate XP percentage
@@ -72,24 +94,3 @@ class Bar:
         text_rect = text_surface.get_rect()
         text_rect.midright = (x + width - 5, y + height // 2)  # Position text 5 pixels from right edge
         surface.blit(text_surface, text_rect)
-    
-    def draw_mp_bar(self, screen, character, x, y):
-        """Draw a mana points bar for a character"""
-        # Draw border
-        pygame.draw.rect(screen, self.border_color, (x, y, self.bar_width, self.bar_height), self.border_width)
-        
-        # Calculate MP percentage
-        mp_percent = character.mp / character.max_mp if character.max_mp > 0 else 0
-        
-        # Draw MP bar
-        mp_width = int(self.bar_width * mp_percent)
-        pygame.draw.rect(screen, self.mp_color, 
-                        (x + self.border_width, y + self.border_width, 
-                         mp_width - self.border_width * 2, 
-                         self.bar_height - self.border_width * 2))
-        
-        # Draw MP text
-        mp_text = f"MP: {character.mp}/{character.max_mp}"
-        text = self.font.render(mp_text, True, self.text_color)
-        text_rect = text.get_rect(center=(x + self.bar_width/2, y + self.bar_height/2))
-        screen.blit(text, text_rect) 

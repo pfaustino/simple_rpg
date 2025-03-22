@@ -10,7 +10,7 @@ from game.sprites import sprite_manager
 from entities.items import Inventory
 
 class Character:
-    def __init__(self, name, level=1, health=100, max_health=100, attack=10, defense=5, speed=5, mp=0, max_mp=0, color=BLUE, character_type='player'):
+    def __init__(self, name, level=1, health=100, max_health=100, attack=10, defense=5, speed=5, mp=0, max_mp=0, color=BLUE, character_type='player', gold=0):
         print(f"Creating character: {name}")  # Debug print
         self.name = name
         self.level = level
@@ -18,6 +18,7 @@ class Character:
         self.max_health = max_health
         self.attack = attack
         self.defense = defense
+        self.gold = gold
         self.speed = speed
         self.mp = mp
         self.max_mp = max_mp
@@ -229,4 +230,5 @@ class Character:
     
     def get_available_spells(self, game):
         """Get list of spells available to the character"""
-        return game.spell_system.get_available_spells(self) 
+        return game.spell_system.get_available_spells(self)
+

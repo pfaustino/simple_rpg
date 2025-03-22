@@ -57,7 +57,11 @@ def play_wave_sound(sound_path, duration=None):
         # Try to play the WAV file
         if os.path.exists(sound_path):
             sound = pygame.mixer.Sound(sound_path)
-            sound.play()
+            channel = sound.play()
+            if duration:  # Only if duration is specified
+                # Start fading out after duration-500ms, taking 500ms to fade
+                pygame.time.wait(duration - 500)
+                sound.fadeout(500)
         else:
             # If file doesn't exist, use fallback beep
             if "attack" in sound_path.lower():
@@ -117,6 +121,7 @@ def save_game(player, world):
                 "exp_to_next_level": player.exp_to_next_level,
                 "mp": player.mp,  # Save current MP
                 "max_mp": player.max_mp,  # Save max MP
+                "gold": player.gold,  # Explicitly save player's gold
                 "kills": player.kills,
                 "inventory": player.inventory.to_dict(),
                 "equipment": {slot: item.to_dict() if item else None 
