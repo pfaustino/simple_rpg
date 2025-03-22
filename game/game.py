@@ -511,6 +511,13 @@ class Game:
                     if menu_action:
                         if menu_action == "Continue":
                             self.system_menu.hide()
+                        elif menu_action == "Save Game":
+                            # Save the game
+                            if save_game(self.player, self.world):
+                                self.message_console.add_message("Game saved successfully!")
+                            else:
+                                self.message_console.add_message("Failed to save game!")
+                            self.system_menu.hide()
                         elif menu_action == "New Game":
                             self.player = self.create_player()
                             self.world = World(self.player)

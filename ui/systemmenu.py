@@ -5,7 +5,7 @@ class SystemMenu:
     def __init__(self, screen_width, screen_height):
         self.font = pygame.font.Font(None, int(FONT_SIZE * 1.5))
         self.title_font = pygame.font.Font(None, int(FONT_SIZE * 3))  # Larger font for RPG title
-        self.options = ["Continue", "New Game", "Tools", "Quit Game"]
+        self.options = ["Continue", "Save Game", "New Game", "Tools", "Quit Game"]
         self.selected_option = 0
         self.is_visible = False
         self.background_color = (0, 0, 0, 180)  # Semi-transparent black
