@@ -210,6 +210,21 @@ class SpriteDebugWindow:
 class World:
     def __init__(self, player):
         """Initialize the world"""
+        # Initialize basic attributes first
+        self.kill_count = 0  # Initialize kill counter first
+        self.player = player
+        self.game = None  # Will be set by Game class
+        self.player_x = 0
+        self.player_y = 0
+        self.world_map = {}
+        self.overlay_map = {}  # Initialize overlay map
+        self.CELL_SIZE = 32
+        self.VIEWPORT_SIZE = WINDOW_SIZE // self.CELL_SIZE
+        self.WORLD_SIZE = 100  # 100x100 world size
+        self.screen = None
+        self.window_width = WINDOW_SIZE
+        self.window_height = WINDOW_SIZE
+        
         # Initialize Pygame display
         pygame.init()
         self.screen = pygame.display.set_mode((WINDOW_SIZE, WINDOW_SIZE), pygame.RESIZABLE)
@@ -218,39 +233,35 @@ class World:
         # Create sprite debug window
         self.sprite_debug_window = SpriteDebugWindow()
         
-        # Initialize sprite manager
+        # Initialize sprite manager first
         sprite_manager.initialize()
         
         # Load sprite mappings if they exist
         load_sprite_mappings()
         
-        # Initialize world state
-        self.player = player
-        self.player_x = 0
-        self.player_y = 0
-        self.world_map = {}
-        self.CELL_SIZE = 32
-        self.VIEWPORT_SIZE = WINDOW_SIZE // self.CELL_SIZE
-        self.WORLD_SIZE = 100  # 100x100 world size
-        self.window_width = WINDOW_SIZE
-        self.window_height = WINDOW_SIZE
+        print("Loading terrain sprites...")
+        # Initialize terrain sprites with proper error handling
+        self.terrain_sprites = {}
+        for terrain in ['water', 'grass', 'sand', 'dirt']:
+            sprite = sprite_manager.get_base_tile(terrain)
+            if sprite and sprite.image:
+                print(f"Loaded {terrain} sprite successfully")
+                self.terrain_sprites[terrain] = sprite
+            else:
+                print(f"Failed to load {terrain} sprite")
         
-        # Initialize sprite dictionaries
-        self.terrain_sprites = {
-            'water': sprite_manager.get_base_tile('water'),
-            'grass': sprite_manager.get_base_tile('grass'),
-            'sand': sprite_manager.get_base_tile('sand'),
-            'dirt': sprite_manager.get_base_tile('dirt')
+        # Define terrain colors as fallback
+        self.terrain_colors = {
+            'water': (0, 0, 255),    # Blue
+            'grass': (0, 255, 0),    # Green
+            'sand': (255, 223, 128),  # Sandy yellow
+            'dirt': (139, 69, 19)     # Brown
         }
-        self.overlay_sprites = {}
         
         # Generate initial world
         self.generate_world()
         
-        # Display the initial viewport after world generation
-        self.display_viewport()
-        
-        print("World initialized")
+        print("World initialized successfully")
 
     def handle_resize(self, size):
         """Handle window resize events"""
@@ -381,144 +392,252 @@ class World:
                         self.overlay_map = {}
                     self.overlay_map[(x, y)] = sprite
 
-    def display_viewport(self, screen=None, player_x=None, player_y=None, offset_y=0):
-        """Display the current viewport centered on the player"""
-        if screen is None:
-            screen = self.screen
-        if player_x is None:
-            player_x = self.player_x
-        if player_y is None:
-            player_y = self.player_y
-            
-        # Clear the screen
-        screen.fill(WHITE)
+    def display_viewport(self, screen, player_x, player_y, status_height=0):
+        """Display the visible portion of the world centered on the player"""
+        self.screen = screen
         
-        # Calculate viewport boundaries
-        viewport_start_x = max(0, player_x - (self.VIEWPORT_SIZE // 2))
-        viewport_start_y = max(0, player_y - (self.VIEWPORT_SIZE // 2))
-        viewport_end_x = min(self.WORLD_SIZE, viewport_start_x + self.VIEWPORT_SIZE)
-        viewport_end_y = min(self.WORLD_SIZE, viewport_start_y + self.VIEWPORT_SIZE)
+        # Calculate the visible area, ensuring player is centered
+        half_viewport = self.VIEWPORT_SIZE // 2
+        start_x = player_x - half_viewport
+        start_y = player_y - half_viewport
+        end_x = player_x + half_viewport + 1
+        end_y = player_y + half_viewport + 1
         
-        # Draw terrain
-        for y in range(viewport_start_y, viewport_end_y):
-            for x in range(viewport_start_x, viewport_end_x):
-                screen_x = (x - viewport_start_x) * self.CELL_SIZE
-                screen_y = (y - viewport_start_y) * self.CELL_SIZE + offset_y
+        # Calculate the offset to center the viewport
+        offset_x = (self.window_width - (self.VIEWPORT_SIZE * self.CELL_SIZE)) // 2
+        offset_y = status_height + (self.window_height - status_height - 150 - (self.VIEWPORT_SIZE * self.CELL_SIZE)) // 2
+        
+        # Draw visible terrain
+        for y in range(start_y, end_y):
+            for x in range(start_x, end_x):
+                # Convert world coordinates to screen coordinates
+                screen_x = (x - start_x) * self.CELL_SIZE + offset_x
+                screen_y = (y - start_y) * self.CELL_SIZE + offset_y
+                
+                # Get terrain and overlay at this position
                 terrain_type = self.get_terrain(x, y)
+                overlay = self.get_overlay(x, y)
+                
+                # Draw terrain sprite
                 if terrain_type in self.terrain_sprites:
                     sprite = self.terrain_sprites[terrain_type]
-                    screen.blit(sprite.image, (screen_x, screen_y))
+                    if sprite and sprite.image:
+                        screen.blit(sprite.image, (screen_x, screen_y))
+                
+                # Draw overlay sprite if it exists
+                if overlay:
+                    # Get the overlay sprite from sprite manager
+                    overlay_sprite = None
+                    if isinstance(overlay, str):
+                        if 'tree' in overlay.lower():
+                            overlay_sprite = sprite_manager.get_overlay_sprite('Trees', overlay)
+                        elif 'rock' in overlay.lower() or 'boulder' in overlay.lower() or 'stone' in overlay.lower():
+                            overlay_sprite = sprite_manager.get_overlay_sprite('Rocks', overlay)
+                        elif 'bush' in overlay.lower() or 'berry' in overlay.lower() or 'flower' in overlay.lower():
+                            overlay_sprite = sprite_manager.get_overlay_sprite('Bushes', overlay)
+                    
+                    if overlay_sprite and overlay_sprite.image:
+                        screen.blit(overlay_sprite.image, (screen_x, screen_y))
         
-        # Draw overlay features
-        for y in range(viewport_start_y, viewport_end_y):
-            for x in range(viewport_start_x, viewport_end_x):
-                screen_x = (x - viewport_start_x) * self.CELL_SIZE
-                screen_y = (y - viewport_start_y) * self.CELL_SIZE + offset_y
-                overlay_type = self.get_overlay(x, y)
-                if overlay_type in self.overlay_sprites:
-                    sprite = self.overlay_sprites[overlay_type]
-                    screen.blit(sprite.image, (screen_x, screen_y))
+        # Store these for player drawing
+        self.viewport_offset_x = offset_x
+        self.viewport_offset_y = offset_y
+        self.half_viewport = half_viewport
+
+    def get_terrain(self, x, y):
+        """Get the terrain type at the given coordinates"""
+        # Ensure coordinates are within world bounds
+        x = max(-50, min(49, x))  # World is 100x100, centered at 0,0
+        y = max(-50, min(49, y))
+        
+        if (x, y) in self.world_map:
+            sprite = self.world_map[(x, y)]
+            if hasattr(sprite, 'name'):
+                sprite_name = sprite.name.lower()
+                # Check terrain types
+                if 'water' in sprite_name:
+                    return 'water'
+                elif 'grass' in sprite_name:
+                    return 'grass'
+                elif 'sand' in sprite_name:
+                    return 'sand'
+                elif 'dirt' in sprite_name:
+                    return 'dirt'
+        
+        return 'grass'  # Default to grass for unknown terrain
+
+    def get_overlay(self, x, y):
+        """Get the overlay type at the given coordinates"""
+        # Ensure coordinates are within world bounds
+        x = max(-50, min(49, x))  # World is 100x100, centered at 0,0
+        y = max(-50, min(49, y))
+        
+        if hasattr(self, 'overlay_map') and (x, y) in self.overlay_map:
+            sprite = self.overlay_map[(x, y)]
+            if hasattr(sprite, 'name'):
+                return sprite.name
+        return None
+
+    def resize(self, width, height):
+        """Update viewport size when window is resized"""
+        self.window_width = width
+        self.window_height = height
+        
+        # Calculate viewport size to ensure player is centered on a single tile
+        # Subtract margins and ensure odd number of tiles
+        viewport_width = (self.window_width - 40) // self.CELL_SIZE
+        viewport_height = (self.window_height - 190) // self.CELL_SIZE
+        
+        # Make sure both dimensions are odd for perfect centering
+        if viewport_width % 2 == 0:
+            viewport_width -= 1
+        if viewport_height % 2 == 0:
+            viewport_height -= 1
+            
+        # Use the smaller dimension to ensure square viewport
+        self.VIEWPORT_SIZE = min(viewport_width, viewport_height)
+        
+        # Update the screen surface with new dimensions
+        self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
+        
+        # Force a redraw of the viewport
+        if self.screen:
+            self.display_viewport(self.screen, self.player_x, self.player_y)
+
+    def update(self):
+        """Update world state"""
+        # Update any world-specific timers or effects
+        pass  # For now, we don't have any world state that needs updating
+
+    def draw(self, screen):
+        """Draw the world"""
+        # Draw the viewport
+        self.display_viewport(screen, self.player_x, self.player_y)
+        
+        # Calculate exact player position
+        # The player should be exactly half_viewport tiles from the start of the viewport
+        player_screen_x = self.half_viewport * self.CELL_SIZE + self.viewport_offset_x
+        player_screen_y = self.half_viewport * self.CELL_SIZE + self.viewport_offset_y
+        
+        # Draw the player
+        self.player.draw(screen, player_screen_x, player_screen_y)
 
     def get_path_to(self, target_x, target_y):
         """Get a path to the target position"""
+        # If the target is not valid, return empty path
+        if not self.is_valid_move(target_x, target_y):
+            return []
+            
         path = []
         current_x = self.player_x
         current_y = self.player_y
         
-        while current_x != target_x or current_y != target_y:
+        # Prevent infinite loops by limiting path length
+        max_attempts = 100
+        attempts = 0
+        
+        while (current_x != target_x or current_y != target_y) and attempts < max_attempts:
+            attempts += 1
             # Move in x direction first
             if current_x < target_x:
-                current_x += 1
+                next_x = current_x + 1
+                next_y = current_y
             elif current_x > target_x:
-                current_x -= 1
+                next_x = current_x - 1
+                next_y = current_y
             # Then move in y direction
             elif current_y < target_y:
-                current_y += 1
+                next_x = current_x
+                next_y = current_y + 1
             elif current_y > target_y:
-                current_y -= 1
-            # Add the new position to the path
-            if self.is_valid_move(current_x, current_y):
-                path.append((current_x, current_y))
+                next_x = current_x
+                next_y = current_y - 1
             else:
-                # If we hit an invalid move, stop pathfinding
+                break
+                
+            # Check if the next move is valid (without showing messages)
+            if self.is_valid_move(next_x, next_y):
+                path.append((next_x, next_y))
+                current_x = next_x
+                current_y = next_y
+            else:
+                # If we hit an invalid move, try to find an alternative path
+                # Try moving in y direction first if we were moving in x
+                if next_x != current_x:
+                    if self.is_valid_move(current_x, next_y):
+                        path.append((current_x, next_y))
+                        current_y = next_y
+                        continue
+                # Try moving in x direction first if we were moving in y
+                elif next_y != current_y:
+                    if self.is_valid_move(next_x, current_y):
+                        path.append((next_x, current_y))
+                        current_x = next_x
+                        continue
+                # If no alternative path is found, stop pathfinding
                 break
         
         return path
 
-    def is_valid_move(self, x, y):
+    def is_valid_move(self, x, y, show_messages=False):
         """Check if a move to the given coordinates is valid"""
-        # Check if the position is within world bounds (-50 to 50 for 100x100 world)
-        if not (-50 <= x <= 50 and -50 <= y <= 50):
+        # Check world bounds
+        if x < -50 or x >= 50 or y < -50 or y >= 50:  # World is 100x100, centered at 0,0
+            if show_messages and hasattr(self, 'game') and self.game and hasattr(self.game, 'message_console'):
+                self.game.message_console.add_message("You cannot leave the world!")
             return False
             
-        # Check if the terrain at this position is walkable
+        # Check terrain
         terrain = self.get_terrain(x, y)
         if terrain == 'water':  # Water is not walkable
+            if show_messages and hasattr(self, 'game') and self.game and hasattr(self.game, 'message_console'):
+                self.game.message_console.add_message("You cannot walk on water!")
             return False
+            
+        # Check overlays (trees, rocks, etc.)
+        overlay = self.get_overlay(x, y)
+        if overlay:  # Only check if overlay exists
+            if isinstance(overlay, str):  # Make sure overlay is a string
+                overlay_lower = overlay.lower()
+                blocking_types = ['tree', 'rock', 'boulder', 'stone']
+                if any(block_type in overlay_lower for block_type in blocking_types):
+                    if show_messages and hasattr(self, 'game') and self.game and hasattr(self.game, 'message_console'):
+                        self.game.message_console.add_message(f"You cannot walk through {overlay}!")
+                    return False
             
         return True
 
     def move_player(self, new_x, new_y):
         """Move the player to a new position and return True if there's an encounter"""
-        # Only update position if the move is valid
-        if self.is_valid_move(new_x, new_y):
+        # Check if the move is valid with messages enabled
+        if self.is_valid_move(new_x, new_y, show_messages=True):
             self.player_x = new_x
             self.player_y = new_y
-            return True
+            return False  # Encounters disabled temporarily
         return False
 
-    def _calculate_max_scroll(self):
-        """Calculate the maximum scroll distance based on content height"""
-        # Initialize sprite cache if not already done
-        if not self._sprite_cache_initialized:
-            self._sprite_cache_initialized = True
-            self._cached_tiles = sprite_manager.get_available_tiles()
-            self._cached_overlays = {}
+    def teleport_home(self):
+        """Teleport the player back to the home position (center of map)"""
+        # Store old position for animation
+        old_x, old_y = self.player_x, self.player_y
         
-        # Calculate dimensions
-        sprite_size = 32
-        sprites_per_row = max(1, (self.window_width - 40) // (sprite_size + 10))
-        row_height = sprite_size + 20
-        visible_height = self.window_height - 40
+        # Set new position to center of map
+        self.player_x = 0
+        self.player_y = 0
         
-        # Calculate total height needed for terrain tiles
-        terrain_rows = (len(self._cached_tiles) + sprites_per_row - 1) // sprites_per_row
-        terrain_height = terrain_rows * row_height + 90  # 90 is initial offset
-        
-        # Calculate total height needed for overlay sections
-        overlay_height = 0
-        for category, sprites in self._cached_overlays.items():
-            if not sprites:
-                continue
-            rows = (len(sprites) + sprites_per_row - 1) // sprites_per_row
-            overlay_height += rows * row_height + 70  # 70 is space for category header and padding
-        
-        # Total content height
-        total_height = terrain_height + overlay_height
-        
-        # Calculate maximum scroll
-        self.max_scroll = max(0, total_height - visible_height)
-        print(f"Max scroll calculated: {self.max_scroll}")  # Debug print 
+        # Add teleport message
+        if hasattr(self, 'game') and self.game and hasattr(self.game, 'message_console'):
+            self.game.message_console.add_message("You have been teleported home!")
+            
+        # Force a redraw of the viewport
+        if self.screen:
+            self.display_viewport(self.screen, self.player_x, self.player_y)
+            pygame.display.flip()
 
-    def get_terrain(self, x, y):
-        """Get the terrain type at the given coordinates"""
-        if (x, y) in self.world_map:
-            sprite = self.world_map[(x, y)]
-            # Extract terrain type from sprite name
-            sprite_name = sprite.name if hasattr(sprite, 'name') else ''
-            if 'water' in sprite_name.lower():
-                return 'water'
-            elif 'grass' in sprite_name.lower():
-                return 'grass'
-            elif 'sand' in sprite_name.lower():
-                return 'sand'
-            elif 'dirt' in sprite_name.lower():
-                return 'dirt'
-        return 'grass'  # Default to grass for unknown terrain
-
-    def get_overlay(self, x, y):
-        """Get the overlay type at the given coordinates"""
-        if hasattr(self, 'overlay_map') and (x, y) in self.overlay_map:
-            sprite = self.overlay_map[(x, y)]
-            return sprite.name if hasattr(sprite, 'name') else None
-        return None 
+    def handle_input(self, event):
+        """Handle keyboard input for the world"""
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_h:  # Press 'H' to teleport home
+                self.teleport_home()
+                return True
+        return False
