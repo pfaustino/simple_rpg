@@ -1,15 +1,15 @@
 import pygame
-from utils.constants import WHITE, BLACK, RED, GREEN, BLUE, YELLOW, PURPLE
+from utils.constants import WHITE, BLACK, RED, GREEN, BLUE, YELLOW, PURPLE, HEALTH_GREEN, DARK_BLUE, DARK_YELLOW
 
 class Bar:
     """A UI component for drawing various types of bars (health, mana, xp, etc.)"""
     
     def __init__(self):
-        self.bar_width = 300
+        self.bar_width = 280
         self.bar_height = 20
         self.border_width = 2
         self.border_color = WHITE
-        self.health_color = GREEN
+        self.health_color = HEALTH_GREEN
         self.xp_color = BLUE
         self.mp_color = BLUE
         self.text_color = WHITE
@@ -17,6 +17,11 @@ class Bar:
     
     def draw_health_bar(self, screen, character, x, y):
         """Draw a health bar for a character"""
+
+        # Draw background
+        hp_bkcolor = PURPLE
+        pygame.draw.rect(screen, hp_bkcolor, (x, y, self.bar_width, self.bar_height))      
+        
         # Draw border
         pygame.draw.rect(screen, self.border_color, (x, y, self.bar_width, self.bar_height), self.border_width)
         
@@ -25,7 +30,7 @@ class Bar:
         
         # Draw health bar with color based on health percentage
         health_width = int(self.bar_width * health_percent)
-        health_color = GREEN if health_percent > 0.5 else YELLOW if health_percent > 0.2 else RED
+        health_color = HEALTH_GREEN if health_percent > 0.5 else DARK_YELLOW if health_percent > 0.2 else RED
         pygame.draw.rect(screen, health_color, 
                         (x + self.border_width, y + self.border_width, 
                          health_width - self.border_width * 2, 
@@ -40,9 +45,13 @@ class Bar:
    
     def draw_mp_bar(self, screen, character, x, y):
         """Draw a mana points bar for a character"""
+        # Draw background
+        mp_bkcolor = PURPLE
+        pygame.draw.rect(screen, mp_bkcolor, (x, y, self.bar_width, self.bar_height))        
+
         # Draw border
         pygame.draw.rect(screen, self.border_color, (x, y, self.bar_width, self.bar_height), self.border_width)
-        
+
         # Calculate MP percentage
         mp_percent = character.mp / character.max_mp if character.max_mp > 0 else 0
         
@@ -75,10 +84,10 @@ class Bar:
         
         # Draw filled portion
         if fill_width > 0:
-            pygame.draw.rect(surface, (0, 0, 255), (x, y, fill_width, height))
+            pygame.draw.rect(surface, DARK_BLUE, (x, y, fill_width, height))
         
         # Draw border
-        pygame.draw.rect(surface, (255, 255, 255), (x, y, width, height), 1)
+        pygame.draw.rect(surface, (255, 255, 255), (x, y, width, height), 2)
         
         # Draw level label inside bar
         font = pygame.font.Font(None, 24)

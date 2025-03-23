@@ -89,5 +89,21 @@
                 "description": "Speed increased by 3"
             }
         }
+    },
+    "attack": {
+        "name": "Attack",
+        "description": "A basic attack that deals damage to the target.",
+        "mp_cost": 0,
+        "damage": 10,
+        "type": "damage",
+        "level_requirement": 1
+    },
+    "strong_attack": {
+        "name": "Strong Attack",
+        "description": "A powerful attack that deals significant damage to the target.",
+        "mp_cost": 10,
+        "damage": 20,
+        "type": "damage",
+        "level_requirement": 2
     }
 } 

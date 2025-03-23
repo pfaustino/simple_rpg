@@ -21,6 +21,7 @@ from ui.systemmenu import SystemMenu
 from game.world import World
 from game.sprites import sprite_manager
 from ui.bar import Bar
+from ui.hotbar import Hotbar
 
 class Game:
     def __init__(self):
@@ -142,6 +143,32 @@ class Game:
         
         self.bar_renderer = Bar()
         
+        # Initialize hotbar
+        self.hotbar = Hotbar(self.width, self.height, self)
+        self.hotbar.set_action(0, "Attack")
+        self.hotbar.set_action(1, "Strong Attack")
+        self.hotbar.set_action(2, "Heal")
+        self.hotbar.set_action(3, "Flee")
+        self.hotbar.set_action(4, "Magic")
+        self.hotbar.set_action(5, "Item")
+        self.hotbar.set_action(6, "Spell")
+        self.hotbar.set_action(7, "Run")
+        self.hotbar.set_action(8, "Inv")
+        self.hotbar.set_action(9, "Hearth")
+        # Add more actions as needed   
+        
+        # Load spells
+        self.load_spells()
+        
+    def load_spells(self):
+        """Load spells from spells.json"""
+        try:
+            with open('data/spells.json', 'r') as f:
+                self.spells = json.load(f)
+        except Exception as e:
+            print(f"Error loading spells: {e}")
+            self.spells = {}
+
     def load_monster_database(self):
         """Load the monster database from JSON file"""
         try:
@@ -177,10 +204,12 @@ class Game:
         enemy = Character(
             monster_data['name'],
             health=monster_data['base_stats']['hp'],
+            max_health=monster_data['base_stats']['hp'],
             attack=monster_data['base_stats']['attack'],
             defense=monster_data['base_stats']['defense'],
             speed=monster_data['base_stats']['speed'],
             mp=monster_data['base_stats']['mp'],
+            max_mp=monster_data['base_stats']['mp'],
             character_type='enemy'
         )
         
@@ -430,18 +459,9 @@ class Game:
         # Record the kill
         self.world.kill_count += 1
         
-        # Generate loot based on monster data if available
-        loot = []
         if enemy.monster_data:
             loot = self.generate_loot(enemy.monster_data)
-        
-        # Calculate total gold from gold items
-        gold_items = [item for item in loot if item.name == "Gold"]
-        total_gold = sum(item.value for item in gold_items)
-        
-        # Add gold directly to player gold instead of inventory
-        self.player.gold += total_gold
-        
+            
         # Add non-gold items to inventory
         non_gold_items = [item for item in loot if item.name != "Gold"]
         for item in non_gold_items:
@@ -454,12 +474,13 @@ class Game:
         # Regenerate some MP after combat
         self.player.mp = min(self.player.max_mp, self.player.mp + 10)
         
+        # Generate loot based on monster data if available
+        loot = []
+        loot_message = f"Defeateds {enemy.name}!"
+        
         # Display victory message with loot
-        loot_message = f"Defeated {enemy.name}!"
-        if total_gold > 0:
-            loot_message += f"\nFound {total_gold} gold!"
         if non_gold_items:
-            loot_message += "\nLoot:"
+            loot_message += "\nLoot: "
             for item in non_gold_items:
                 if item.quantity > 1:
                     loot_message += f"\n- {item.name} (x{item.quantity})"
@@ -469,7 +490,13 @@ class Game:
         self.message_console.add_message(loot_message)
         if exp_gained > 0:
             self.message_console.add_message(f"Gained {exp_gained} XP!")
-        
+            # Generate gold based on the gold_range
+        if "gold_range" in enemy.monster_data:
+            min_gold, max_gold = enemy.monster_data["gold_range"]
+            gold_amount = random.randint(min_gold, max_gold)
+            self.player.gold += gold_amount  # Add gold to player's total
+            self.message_console.add_message(f"Found {gold_amount} gold!")
+                        
         # Autosave after successful fight
         save_game(self.player, self.world)
         self.message_console.add_message("Game autosaved!")
@@ -543,11 +570,14 @@ class Game:
             # Always draw persistent UI elements last
             self.draw_player_status()  # Draw status bar at the top
             self.draw_game_state()
-            
+ 
+            # Draw hotbar
+            self.hotbar.draw(self.screen)
+                        
             # Draw system menu if visible
             if self.system_menu.is_visible:
                 self.system_menu.draw(self.screen)
-            
+                      
             # Update the display
             pygame.display.flip()
             
@@ -765,10 +795,10 @@ class Game:
         self.bar_renderer.draw_health_bar(self.screen, self.player, 10, 10)
         
         # Draw MP bar
-        self.bar_renderer.draw_mp_bar(self.screen, self.player, 10, 35)
+        self.bar_renderer.draw_mp_bar(self.screen, self.player, 10, 28)
         
         # Draw XP bar with level label inside
-        self.bar_renderer.draw_xp_bar(self.screen, self.player, 10, 60)
+        self.bar_renderer.draw_xp_bar(self.screen, self.player, 10, 47)
         
     def draw_combat_screen(self):
         """Draw the combat screen with all UI elements"""
@@ -1291,3 +1321,44 @@ class Game:
         gold_text = f"Gold: {total_gold}"
         gold_surface = self.font.render(gold_text, True, WHITE)  # Render the text
         self.screen.blit(gold_surface, (mini_console_x + 10, mini_console_y + 10))  # Position the text in the mini console 
+
+        # Draw hotbar
+        self.hotbar.draw(self.screen) 
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            self.hotbar.handle_input(event)  # Handle hotbar input 
+
+    def attack_target(self, target, action):
+        """Perform an attack or cast a spell on the target."""
+        if action in self.spells:
+            spell = self.spells[action]
+            if self.mp >= spell["mp_cost"]:
+                self.mp -= spell["mp_cost"]
+                damage = spell["damage"]
+                actual_damage = target.take_damage(damage)
+                return actual_damage
+            else:
+                print("Not enough MP to cast the spell.")
+                return 0
+        else:
+            # Fallback to basic attack if action is not a spell
+            base_damage = self.get_total_attack()
+            damage_variation = random.randint(-3, 3)
+            damage = max(1, base_damage + damage_variation)
+            actual_damage = target.take_damage(damage)
+            return actual_damage 
+
+    def handle_combat_action(self, action):
+        """Handle a combat action"""
+        if action in self.spells:
+            # Cast the spell
+            damage = self.player.attack_target(self.current_enemy, action)
+            self.message_console.add_message(f"{self.player.name} casts {action} for {damage} damage!")
+            return "continue"
+        else:
+            # Handle normal attack
+            damage = self.player.attack_target(self.current_enemy, "Attack")
+            self.message_console.add_message(f"{self.player.name} attacks for {damage} damage!")
+            return "continue" 

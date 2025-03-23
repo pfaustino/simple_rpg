@@ -161,24 +161,24 @@ class CombatSystem:
         # Draw combat UI elements
         # Draw player status bar at the top
         self.game.bar_renderer.draw_health_bar(self.game.screen, self.game.player, 10, 10)
-        self.game.bar_renderer.draw_mp_bar(self.game.screen, self.game.player, 10, 35)
-        self.game.bar_renderer.draw_xp_bar(self.game.screen, self.game.player, 10, 60)
+        self.game.bar_renderer.draw_mp_bar(self.game.screen, self.game.player, 10, 28)
+        self.game.bar_renderer.draw_xp_bar(self.game.screen, self.game.player, 10, 47)
         
         # Draw enemy health bar if enemy exists
         if self.current_enemy:
-            self.game.bar_renderer.draw_health_bar(self.game.screen, self.current_enemy, 10, 85)
+            self.game.bar_renderer.draw_health_bar(self.game.screen, self.current_enemy, 310, 10)
         
         # Draw combat options with number key shortcuts
-        combat_options = [
-            "1 - Attack",
-            "2 - Strong Attack (10 MP)",
-            "3 - Heal (20 MP)",
-            "4 - Flee"
-        ]
-        for i, option in enumerate(combat_options):
-            color = WHITE if i == self.selected_option else (200, 200, 200)
-            text = self.game.font.render(option, True, color)
-            self.game.screen.blit(text, (20, 120 + i * 30))
+        #combat_options = [
+        #    "1 - Attack",
+        #    "2 - Strong Attack (10 MP)",
+        #    "3 - Heal (20 MP)",
+        #    "4 - Flee"
+        #]
+        #for i, option in enumerate(combat_options):
+        #    color = WHITE if i == self.selected_option else (200, 200, 200)
+        #    text = self.game.font.render(option, True, color)
+        #    self.game.screen.blit(text, (20, 120 + i * 30))
         
         # Draw message console at the bottom
         # console_height = 150

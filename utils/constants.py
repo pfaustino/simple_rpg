@@ -15,11 +15,13 @@ GRAY = (128, 128, 128)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+DARK_BLUE = (0, 0, 128)
 BROWN = (139, 69, 19)
 YELLOW = (255, 255, 0)
+DARK_YELLOW = (128, 128, 0)
 PURPLE = (128, 0, 128)
 DARK_GREEN = (0, 100, 0)  # Darker green for terrain
-HEALTH_GREEN = (0, 200, 0)  # Brighter green for health bars
+HEALTH_GREEN = (0, 120, 0)  # Darker green for health bars
 GOLD_COLOR = (255, 215, 0)  # Color for gold items
 
 # Font settings
